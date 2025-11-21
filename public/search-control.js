@@ -20,6 +20,10 @@
 
   // Fuse.js version to match package.json
   const FUSE_VERSION = '6.6.2';
+  
+  // Marker colors
+  const SOURCE_MARKER_COLOR = '#00ff00';
+  const TARGET_MARKER_COLOR = '#ff0000';
 
   /**
    * Dynamically load Fuse.js from CDN if not already available
@@ -285,7 +289,7 @@
   function selectNode(node) {
     if (!sourceMarker) {
       // First selection: set as source
-      sourceMarker = new maplibregl.Marker({ color: '#00ff00' })
+      sourceMarker = new maplibregl.Marker({ color: SOURCE_MARKER_COLOR })
         .setLngLat(node.coordinates)
         .setPopup(new maplibregl.Popup().setHTML(`<strong>Source:</strong> ${node.name}`))
         .addTo(mapInstance);
@@ -298,7 +302,7 @@
       console.log('Source set:', node.name);
     } else if (!targetMarker) {
       // Second selection: set as target
-      targetMarker = new maplibregl.Marker({ color: '#ff0000' })
+      targetMarker = new maplibregl.Marker({ color: TARGET_MARKER_COLOR })
         .setLngLat(node.coordinates)
         .setPopup(new maplibregl.Popup().setHTML(`<strong>Target:</strong> ${node.name}`))
         .addTo(mapInstance);
