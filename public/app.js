@@ -14,6 +14,28 @@ function initMap() {
 
   map.on('load', () => {
     console.log('Map loaded successfully');
+    
+    // Load search control CSS
+    if (!document.querySelector('link[href*="search-control.css"]')) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = 'search-control.css';
+      document.head.appendChild(link);
+    }
+    
+    // Load and initialize search control
+    if (typeof window.initSearchControl === 'undefined') {
+      const script = document.createElement('script');
+      script.src = 'search-control.js';
+      script.onload = function() {
+        if (typeof window.initSearchControl === 'function') {
+          window.initSearchControl(map, { endpoint: '/v1/node' });
+        }
+      };
+      document.head.appendChild(script);
+    } else {
+      window.initSearchControl(map, { endpoint: '/v1/node' });
+    }
   });
 
   map.on('error', (e) => {

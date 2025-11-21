@@ -18,6 +18,7 @@
   "dependencies": {
     "dotenv": "latest",
     "express": "latest",
+    "fuse.js": "^6.6.2",
     "http-proxy-middleware": "latest",
     "maplibre-gl": "latest",
     "humanize-duration": "latest"
