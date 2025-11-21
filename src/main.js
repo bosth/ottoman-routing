@@ -39,13 +39,9 @@ function initMap() {
     return;
   }
 
-  // Determine the base URL for the style - need to handle both dev and production
-  const baseUrl = import.meta.env.BASE_URL || '/';
-  const styleUrl = `${baseUrl}terrain-style.json`;
-
   const map = new maplibregl.Map({
     container: 'map',
-    style: styleUrl,
+    style: 'terrain-style.json', // Served from public folder
     center: [29.0, 41.0], // Istanbul, Turkey - fitting for Ottoman routing theme
     zoom: 10
   });
