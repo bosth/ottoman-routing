@@ -25,14 +25,17 @@ function initMap() {
     
     // Load and initialize search control
     if (typeof window.initSearchControl === 'undefined') {
-      const script = document.createElement('script');
-      script.src = 'search-control.js';
-      script.onload = function() {
-        if (typeof window.initSearchControl === 'function') {
-          window.initSearchControl(map, { endpoint: '/v1/node' });
-        }
-      };
-      document.head.appendChild(script);
+      // Check if script is already being loaded or loaded
+      if (!document.querySelector('script[src="search-control.js"]')) {
+        const script = document.createElement('script');
+        script.src = 'search-control.js';
+        script.onload = function() {
+          if (typeof window.initSearchControl === 'function') {
+            window.initSearchControl(map, { endpoint: '/v1/node' });
+          }
+        };
+        document.head.appendChild(script);
+      }
     } else {
       window.initSearchControl(map, { endpoint: '/v1/node' });
     }

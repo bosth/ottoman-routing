@@ -16,6 +16,10 @@
   let suggestionsContainer = null;
   let searchInput = null;
   let activeSuggestionIndex = -1;
+  let documentClickHandler = null;
+
+  // Fuse.js version to match package.json
+  const FUSE_VERSION = '6.6.2';
 
   /**
    * Dynamically load Fuse.js from CDN if not already available
@@ -27,7 +31,7 @@
     }
 
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/fuse.js@6.6.2/dist/fuse.min.js';
+    script.src = `https://cdn.jsdelivr.net/npm/fuse.js@${FUSE_VERSION}/dist/fuse.min.js`;
     script.onload = function() {
       callback(null, window.Fuse);
     };
@@ -382,11 +386,16 @@
         ui.input.addEventListener('keydown', handleKeyboardNavigation);
 
         // Hide suggestions when clicking outside
-        document.addEventListener('click', function(e) {
+        // Remove old listener if exists to prevent duplicates
+        if (documentClickHandler) {
+          document.removeEventListener('click', documentClickHandler);
+        }
+        documentClickHandler = function(e) {
           if (!controlContainer.contains(e.target)) {
             suggestionsContainer.style.display = 'none';
           }
-        });
+        };
+        document.addEventListener('click', documentClickHandler);
 
         console.log('Search control initialized');
       });
