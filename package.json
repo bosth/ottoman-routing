@@ -1,0 +1,30 @@
+{
+  "name": "node-auto-api-select-app",
+  "version": "0.3.0",
+  "description": "Static frontend with Vite + MapLibre; frontend auto-selects API server (build-time via env or runtime fallback).",
+  "homepage": "https://bosth.github.io/ottoman-routing",
+  "main": "server.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:remote": "vite build --mode production",
+    "preview": "vite preview --port 5000",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d dist",
+    "start": "NODE_ENV=production node server.js"
+  },
+  "author": "bosth",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "latest",
+    "express": "latest",
+    "http-proxy-middleware": "latest",
+    "maplibre-gl": "latest",
+    "humanize-duration": "latest"
+  },
+  "devDependencies": {
+    "nodemon": "latest",
+    "gh-pages": "latest",
+    "vite": "latest"
+  }
+}
