@@ -306,22 +306,6 @@ export default async function initSearchControl(map, opts = {}) {
     renderSuggestionsForRole(role);
   }
 
-  // Zoom to a point when it's selected
-  function zoomToFeaturePoint(feat) {
-    if (!feat || !feat.geometry) return;
-    try {
-      if (feat.geometry.type === 'Point') {
-        const [lng, lat] = feat.geometry.coordinates;
-        map.easeTo({ center: [lng, lat], zoom: 14, duration: 600 });
-      } else {
-        // fallback: compute bbox for geometry and fit bounds
-        fitBoundsForGeoJSON({ type: 'FeatureCollection', features: [feat] });
-      }
-    } catch (e) {
-      // ignore
-    }
-  }
-
   function setSelectedFeature(role, feat) {
     if (!feat) selected[role] = null;
     else selected[role] = feat;
@@ -370,10 +354,11 @@ export default async function initSearchControl(map, opts = {}) {
       return;
     }
     await ensureHumanize();
+
     const rows = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
       return {
-        idx: i + 1,
+        idx: i,
         source: p.source ?? p.src ?? '',
         target: p.target ?? p.tgt ?? '',
         line: p.line ?? '',
@@ -387,28 +372,48 @@ export default async function initSearchControl(map, opts = {}) {
     const totalMins = rows.reduce((acc, r) => acc + (Number(r.cost) || 0), 0);
     const totalHuman = await formatCostMinutes(totalMins);
 
-    const summaryHtml = `<div class="ml-summary"><div class="ml-summary-left">${escapeHtml(String(firstSource))} 🢒 ${escapeHtml(String(lastTarget))}</div><div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div></div>`;
+    // summary: left = first → last, right = total time (same line, right-justified)
+    const summaryHtml = `<div class="ml-summary" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+    <div class="ml-summary-left" style="font-weight:600">${escapeHtml(String(firstSource))} 🢒 ${escapeHtml(String(lastTarget))}</div>
+    <div class="ml-summary-right" style="font-weight:600;color:#333">${escapeHtml(String(totalHuman))}</div>
+    </div>`;
 
-    const modeSymbols = rows.map(r => {
-      const modeKey = (String(r.mode || '')).toLowerCase();
-      return modeSymbolMap.hasOwnProperty(modeKey) ? modeSymbolMap[modeKey] : '';
-    }).filter(Boolean);
-
-    const modeSymbolsHtml = modeSymbols.length
-    ? `<div class="ml-mode-list">${modeSymbols.map((sym, i) => `<span class="material-symbols-outlined ml-icon-inline">${escapeHtml(sym)}</span>${i < modeSymbols.length - 1 ? '<span class="ml-arrow"> 🢒 </span>' : ''}`).join('')}</div>`
-    : '';
-
+    // build segment "cards" with light styling; each card gets data-idx for click handling
     const html = rows.map(r => {
       const modeKey = (String(r.mode || '')).toLowerCase();
       const symbolName = modeSymbolMap.hasOwnProperty(modeKey) ? modeSymbolMap[modeKey] : '';
-      const iconHtml = symbolName ? `<span class="material-symbols-outlined ml-icon">${escapeHtml(symbolName)}</span>` : '';
-      return `<div class="ml-seg">
-      <div class="ml-seg-row">${iconHtml}<strong>${escapeHtml(String(r.source))}</strong> 🢒 <strong>${escapeHtml(String(r.target))}</strong></div>
-      <div class="ml-seg-meta">line: ${escapeHtml(String(r.line))} • mode: ${escapeHtml(String(r.mode))} • cost: <span class="ml-cost" data-cost="${escapeHtml(String(r.cost))}">${escapeHtml(String(r.cost))}</span></div>
+      const iconHtml = symbolName ? `<span class="material-symbols-outlined ml-icon" style="font-size:18px;color:#444;margin-right:6px">${escapeHtml(symbolName)}</span>` : '';
+      return `<div class="ml-seg card" data-idx="${r.idx}" style="border:1px solid #e6e6e6;border-radius:8px;padding:10px;margin-bottom:8px;background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04)">
+      <div class="ml-seg-row" style="display:flex;align-items:center;gap:8px;">
+      ${iconHtml}<strong style="font-size:14px;color:#222">${escapeHtml(String(r.source))}</strong>
+      <span style="margin:0 8px;color:#999">🢒</span>
+      <strong style="font-size:14px;color:#222">${escapeHtml(String(r.target))}</strong>
+      </div>
+      <div class="ml-seg-meta" style="font-size:12px;color:#666;margin-top:8px">
+      line: ${escapeHtml(String(r.line))} • mode: ${escapeHtml(String(r.mode))} • cost: <span class="ml-cost" data-cost="${escapeHtml(String(r.cost))}">${escapeHtml(String(r.cost))}</span>
+      </div>
       </div>`;
     }).join('');
 
-    sidebar.innerHTML = `<div class="ml-sidebar-title">Route segments</div>${summaryHtml}${modeSymbolsHtml}${html}`;
+    // Note: removed the modeSymbolsHtml line (mode symbol row removed as requested)
+    sidebar.innerHTML = `<div class="ml-sidebar-title">Route segments</div>${summaryHtml}${html}`;
+
+    // attach click handlers to each card so clicking fits/zooms to that segment's geometry
+    const segEls = sidebar.querySelectorAll('.ml-seg.card');
+    segEls.forEach(el => {
+      el.addEventListener('click', () => {
+        const idx = Number(el.getAttribute('data-idx'));
+        if (isNaN(idx)) return;
+        const feat = routeGeo.features[idx];
+        if (!feat) return;
+        try {
+          // use existing fitBoundsForGeoJSON helper to fit the map to this single segment
+          fitBoundsForGeoJSON({ type: 'FeatureCollection', features: [feat] });
+        } catch (e) {
+          // ignore map errors
+        }
+      });
+    });
 
     const costEls = sidebar.querySelectorAll('.ml-cost');
     await Promise.all(Array.from(costEls).map(async (el) => {
