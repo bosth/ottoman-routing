@@ -3,13 +3,39 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Ottoman Routing - MapLibre</title>
-  <script type="module" crossorigin src="/ottoman-routing/assets/index-C1TllTtI.js"></script>
-  <link rel="stylesheet" crossorigin href="/ottoman-routing/assets/index-kWVbv8B-.css">
+  <title>Ottoman Routing - MapLibre Demo</title>
+
+  <!-- runtime API base fallback: localhost -> http://localhost:8080, otherwise production host -->
+  <script>
+    (function () {
+      if (typeof window.__API_BASE__ === 'undefined') {
+        try {
+          var host = location.hostname;
+          if (host === 'localhost' || host === '127.0.0.1') {
+            window.__API_BASE__ = 'http://localhost:8080';
+          } else {
+            window.__API_BASE__ = 'https://geo.jaxartes.net';
+          }
+        } catch (e) {
+          window.__API_BASE__ = 'https://geo.jaxartes.net';
+        }
+      }
+    })();
+  </script>
+
+  <link href="https://unpkg.com/maplibre-gl@latest/dist/maplibre-gl.css" rel="stylesheet" />
+  <!-- Material Symbols (Google) for segment symbology (exact link you provided) -->
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20,100,1,200&icon_names=anchor,cable_car,directions_boat,directions_railway_2,directions_walk,funicular,subway_walk,train,tram" rel="stylesheet" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; }
+    #map { width: 100%; height: 100%; }
+  </style>
+  <script type="module" crossorigin src="/ottoman-routing/assets/index-VnkchALm.js"></script>
+  <link rel="stylesheet" crossorigin href="/ottoman-routing/assets/index-DrwbujGM.css">
 </head>
 <body>
-  <div id="app"></div>
+  <div id="map" aria-label="Map"></div>
 
-  <!-- Vite will load /src/main.js as an ESM module -->
 </body>
 </html>
