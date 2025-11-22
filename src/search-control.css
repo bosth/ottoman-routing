@@ -210,8 +210,43 @@
   padding: 2px 0;
 }
 
+/* Right side for node rows: name + optional (mode) + optional cost */
 .ml-flow-right-node {
   padding: 2px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.ml-node-main {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ml-node-label {
+  font-size: 13px;
+  line-height: 1.2;
+  word-break: break-word;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml-node-mode {
+  font-size: 11px;
+  color: #555;
+  white-space: nowrap;
+}
+
+.ml-node-cost {
+  font-size: 11px;
+  font-weight: 600;
+  color: #222;
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 /* Segment row */

@@ -330,6 +330,29 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   // Row-based sidebar layout: each row is either a node or a segment
+  // Row-based sidebar layout: each row is either a node or a segment.
+  // "switch" segments (line name 'switch') are folded into the *target* node row:
+  //  - no separate segment row
+  //  - target node row shows "(switch)" and the segment's humanized cost.
+  // Row-based sidebar layout: each row is either a node or a segment.
+  // Special case: segments with line name "switch" are folded into the *target* node row.
+  // Row-based sidebar layout: each row is either a node or a segment.
+  // Special case: segments with line name "switch" are folded into the *first occurrence*
+  // of that node, and never rendered as separate segment rows.
+  // Row-based sidebar layout: each row is either a node or a segment.
+  // Special case: segments whose line name is "switch" (case-insensitive)
+  // are folded into the *first occurrence* of their target node:
+  //  - they never render as their own segment rows
+  //  - the target node row shows "(switch)" and the humanized cost.
+  // Row-based sidebar layout: each row is either a node or a segment.
+  // Special case:
+  //   A "switch" segment (line name 'switch', case-insensitive) that is a self-loop
+  //   (source === target) will be merged into the *following* node row:
+  //     Node X
+  //     (switch X→X, cost)
+  //     Node X
+  //   becomes:
+  //     Node X  (switch)  cost
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
@@ -339,6 +362,7 @@ export default async function initSearchControl(map, opts = {}) {
     }
     await ensureHumanize();
 
+    // Normalize segments
     const segs = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
       return {
@@ -352,19 +376,22 @@ export default async function initSearchControl(map, opts = {}) {
       };
     });
 
-    // node sequence: first source then each segment's target
-    const nodes = [];
-    if (segs.length) {
-      nodes.push(segs[0].source);
-      segs.forEach(s => nodes.push(s.target));
+    if (!segs.length) {
+      sidebar.innerHTML = '';
+      try { container.classList.remove('ml-search-fixed'); } catch (e) {}
+      return;
     }
+
+    // Build nodes: first source, then each segment's target
+    const nodes = [];
+    nodes.push(segs[0].source);
+    segs.forEach(s => nodes.push(s.target)); // length = segs.length + 1
 
     const firstSource = nodes[0] || '';
     const lastTarget = nodes[nodes.length - 1] || '';
+
     const totalMins = segs.reduce((acc, s) => acc + (Number(s.cost) || 0), 0);
     const totalHuman = await formatCostMinutes(totalMins);
-
-    // humanize each segment cost
     const humanizedCosts = await Promise.all(segs.map(s => formatCostMinutes(s.cost)));
 
     try { container.classList.add('ml-search-fixed'); } catch (e) {}
@@ -375,41 +402,117 @@ export default async function initSearchControl(map, opts = {}) {
     <div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div>
     </div>`;
 
-    // Build flat list of rows: [node0, seg0, node1, seg1, ..., nodeN]
-    const rows = [];
-    if (nodes.length) {
-      for (let i = 0; i < segs.length; i++) {
-        rows.push({ type: 'node', label: nodes[i] });
-        rows.push({
-          type: 'segment',
-          nodeAbove: nodes[i],
-          nodeBelow: nodes[i + 1],
-          idx: segs[i].idx,
-          line: segs[i].line,
-          mode: segs[i].mode,
-          color: segs[i].color,
-          costHuman: humanizedCosts[i]
-        });
-      }
-      rows.push({ type: 'node', label: nodes[nodes.length - 1] });
+    // 1. Build a step timeline:
+    //    Node 0, Segment 0, Node 1, Segment 1, Node 2, ..., Segment N-1, Node N
+    const steps = [];
+    const isSwitchSeg = seg =>
+    String(seg.line || '').toLowerCase() === 'switch' &&
+    String(seg.source || '') === String(seg.target || '');
+
+    // Start with first node
+    steps.push({ kind: 'node', label: nodes[0], foldedSwitch: null });
+
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      const costHuman = humanizedCosts[i];
+      const switchy = isSwitchSeg(seg);
+
+      steps.push({
+        kind: 'segment',
+        idx: seg.idx,
+        line: seg.line,
+        mode: seg.mode,
+        color: seg.color,
+        costHuman,
+        isSwitch: switchy,
+        source: seg.source,
+        target: seg.target
+      });
+
+      steps.push({
+        kind: 'node',
+        label: nodes[i + 1],
+        foldedSwitch: null
+      });
     }
 
+    // 2. Walk the step timeline and build final rows while
+    //    merging "node, switch self-loop, same-node" triplets into one node row.
+    const rows = [];
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+
+      if (step.kind === 'node') {
+        // Look ahead for the pattern: node, switch segment self-loop, node with same label
+        const next = steps[i + 1];
+        const afterNext = steps[i + 2];
+
+        if (
+          next &&
+          next.kind === 'segment' &&
+          next.isSwitch === true &&
+          afterNext &&
+          afterNext.kind === 'node' &&
+          String(afterNext.label) === String(step.label)
+        ) {
+          // Merge into a single folded node row
+          rows.push({
+            type: 'node',
+            label: step.label,
+            switchLine: next.line,            // "switch"
+              switchCostHuman: next.costHuman   // humanized cost
+          });
+
+          // Skip over the next two steps (switch segment + duplicate node)
+          i += 2;
+          continue;
+        }
+
+        // Normal node row, no folded switch
+        rows.push({
+          type: 'node',
+          label: step.label,
+          switchLine: null,
+            switchCostHuman: null
+        });
+      } else if (step.kind === 'segment') {
+        // Only render non-switch segments as segment rows
+        if (!step.isSwitch) {
+          rows.push({
+            type: 'segment',
+            idx: step.idx,
+            line: step.line,
+            mode: step.mode,
+            color: step.color,
+            costHuman: step.costHuman
+          });
+        }
+      }
+    }
+
+    // 3. Render to HTML
     const flowRowsHtml = rows.map(row => {
       if (row.type === 'node') {
-        // Node row: circle + node label
         const label = escapeHtml(String(row.label || ''));
+        const hasSwitch = !!row.switchLine && !!row.switchCostHuman;
+        const modeLabel = hasSwitch ? escapeHtml(String(row.switchLine)) : '';
+        const costLabel = hasSwitch ? escapeHtml(String(row.switchCostHuman)) : '';
+
         return `
         <div class="ml-flow-row ml-flow-row-node">
         <div class="ml-flow-left">
         <span class="ml-node"></span>
         </div>
         <div class="ml-flow-right ml-flow-right-node">
-        <div class="ml-node-label">${label}</div>
+        <div class="ml-node-main">
+        <span class="ml-node-label">${label}</span>
+        ${hasSwitch ? `<span class="ml-node-mode">(${modeLabel})</span>` : ''}
+        </div>
+        ${hasSwitch ? `<div class="ml-node-cost">${costLabel}</div>` : ''}
         </div>
         </div>`;
       }
 
-      // Segment row: connector + icon + italic line + cost
       const segColor = String(row.color || '#000000');
       const modeKey = String(row.mode || '').toLowerCase();
       const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
@@ -448,10 +551,9 @@ export default async function initSearchControl(map, opts = {}) {
 
     const flowHtml = `<div class="ml-flow">${flowRowsHtml}</div>`;
 
-    // No "Route segments" title
     sidebar.innerHTML = `${summaryHtml}<div class="ml-seg-list">${flowHtml}</div>`;
 
-    // Attach handlers for segment elements: click and keyboard
+    // Segment row interactions
     const segLineEls = sidebar.querySelectorAll('.ml-seg-line');
     segLineEls.forEach(el => {
       const clickHandler = () => {
@@ -468,7 +570,7 @@ export default async function initSearchControl(map, opts = {}) {
     });
   }
 
-  // Compute bbox and fit map to bounds for the given GeoJSON (FeatureCollection)
+  // Compute bbox and fit map to bounds
   function fitBoundsForGeoJSON(gj, opts = {}) {
     if (!gj || !Array.isArray(gj.features) || gj.features.length === 0) return;
 
@@ -603,6 +705,7 @@ export default async function initSearchControl(map, opts = {}) {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('Route fetch failed: ' + res.status);
       const routeGeo = await res.json();
+          window.__lastRouteGeo = routeGeo;
       if (!routeGeo || !Array.isArray(routeGeo.features)) throw new Error('Invalid route GeoJSON');
 
       const palette = ['#1a73e8', '#d32f2f', '#2e7d32', '#fbc02d', '#6a1b9a', '#fb8c00', '#1e88e5', '#ec407a'];
@@ -633,16 +736,15 @@ export default async function initSearchControl(map, opts = {}) {
           props.ml_color = lineColorMap[key] || shuffled[idx % shuffled.length];
         }
 
-        // Sidebar color: default black, override for some modes
         let sidebarColor;
         if (mode === 'railway' || mode === 'narrow-gauge railway') {
           sidebarColor = '#000000';
         } else if (mode === 'ferry' || mode === 'ship') {
-          sidebarColor = '#1a73e8'; // copy map's blue for water modes
+          sidebarColor = '#1a73e8';
         } else if (props.ml_color) {
-          sidebarColor = props.ml_color; // tram/metro palette
+          sidebarColor = props.ml_color;
         } else {
-          sidebarColor = '#000000'; // everything else: black
+          sidebarColor = '#000000';
         }
         props.ml_sidebar_color = sidebarColor;
 
@@ -661,7 +763,10 @@ export default async function initSearchControl(map, opts = {}) {
         console.error('Failed to add/update search-route source:', err && err.message ? err.message : err);
         try { if (map.getLayer('search-route-line-fallback')) map.removeLayer('search-route-line-fallback'); } catch (_) {}
         try { if (map.getSource('search-route')) map.removeSource('search-route'); } catch (_) {}
-        try { map.addSource('search-route', { type: 'geojson', data: routeGeo }); } catch (err2) { console.error('Fatal: could not add search-route source:', err2 && err2.message ? err2.message : err2); throw err2; }
+        try { map.addSource('search-route', { type: 'geojson', data: routeGeo }); } catch (err2) {
+          console.error('Fatal: could not add search-route source:', err2 && err2.message ? err2.message : err2);
+          throw err2;
+        }
       }
 
       const endPoints = [];
@@ -692,7 +797,9 @@ export default async function initSearchControl(map, opts = {}) {
         } else {
           map.addSource('search-route-ends', { type: 'geojson', data: { type: 'FeatureCollection', features: endPoints } });
         }
-      } catch (err) { console.warn('Failed to add/update search-route-ends source:', err); }
+      } catch (err) {
+        console.warn('Failed to add/update search-route-ends source:', err);
+      }
 
       try { if (map.getLayer('search-route-line-base')) map.removeLayer('search-route-line-base'); } catch (_) {}
       try { if (map.getLayer('search-route-rail-symbol')) map.removeLayer('search-route-rail-symbol'); } catch (_) {}
