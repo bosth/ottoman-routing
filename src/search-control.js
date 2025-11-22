@@ -1,13 +1,14 @@
+import Fuse from 'fuse.js';
+
 // src/search-control.js
 // - Fixes railway rendering by using fixed-pixel symbol repeat fallback to guarantee
 //   fixed-size squares regardless of zoom. Adds small canvas images and always uses
 //   symbol layers with symbol-placement: 'line' + symbol-spacing so the squares do not scale.
 // - Makes narrow-gauge visually distinct (smaller width + smaller square tile).
 // - Zoom behavior:
-//     * when a user selects a start/target, map eases to that point (zoom ~14)
+//     * the explicit point zoom helper was removed (no automatic zoom when selecting start).
 //     * when a route is displayed, map.fitBounds to the route (padding 60)
 // - Keeps the rest of the control behavior (suggestions, keyboard navigation, etc.)
-import Fuse from 'fuse.js';
 
 function loadScript(src) {
   return new Promise((resolve, reject) => {
@@ -306,6 +307,8 @@ export default async function initSearchControl(map, opts = {}) {
     renderSuggestionsForRole(role);
   }
 
+  // Note: zoomToFeaturePoint helper removed as requested — no automatic point zoom helper here.
+
   function setSelectedFeature(role, feat) {
     if (!feat) selected[role] = null;
     else selected[role] = feat;
@@ -326,14 +329,7 @@ export default async function initSearchControl(map, opts = {}) {
       map.addSource('search-selected', { type: 'geojson', data: fc });
     }
 
-    // Zoom to selected point (user requested)
-    if (feat) {
-      try {
-        zoomToFeaturePoint(feat);
-      } catch (e) {
-        // ignore zoom failures
-      }
-    }
+    // No automatic zoom/fly on selection (user removed zoom helper).
   }
 
   async function formatCostMinutes(mins) {
@@ -347,10 +343,17 @@ export default async function initSearchControl(map, opts = {}) {
     return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'] });
   }
 
+  // Replace/update the existing updateSidebarForRoute function with this version.
+  // It preserves previous behavior (summary, seg-list scrolling, click handlers, async cost formatting)
+  // but changes the card markup for modes that have material-symbol icons so they render as:
+  //  - top line: small circle + source
+  //  - middle line: transport icon + line name (left), cost (right)
+  //  - bottom line: small circle + target
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
       sidebar.innerHTML = '';
+      try { container.classList.remove('ml-search-fixed'); } catch (e) {}
       return;
     }
     await ensureHumanize();
@@ -361,9 +364,9 @@ export default async function initSearchControl(map, opts = {}) {
         idx: i,
         source: p.source ?? p.src ?? '',
         target: p.target ?? p.tgt ?? '',
-        line: p.line ?? '',
-        mode: p.mode ?? '',
-        cost: p.cost ?? 0
+        line: p.line ?? p.name ?? '',
+        mode: (p.mode ?? '').toLowerCase(),
+                                       cost: p.cost ?? 0
       };
     });
 
@@ -372,31 +375,64 @@ export default async function initSearchControl(map, opts = {}) {
     const totalMins = rows.reduce((acc, r) => acc + (Number(r.cost) || 0), 0);
     const totalHuman = await formatCostMinutes(totalMins);
 
-    // summary: left = first → last, right = total time (same line, right-justified)
-    const summaryHtml = `<div class="ml-summary" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-    <div class="ml-summary-left" style="font-weight:600">${escapeHtml(String(firstSource))} 🢒 ${escapeHtml(String(lastTarget))}</div>
-    <div class="ml-summary-right" style="font-weight:600;color:#333">${escapeHtml(String(totalHuman))}</div>
+    try { container.classList.add('ml-search-fixed'); } catch (e) {}
+
+    const summaryHtml = `
+    <div class="ml-summary">
+    <div class="ml-summary-left">${escapeHtml(String(firstSource))} 🢒 ${escapeHtml(String(lastTarget))}</div>
+    <div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div>
     </div>`;
 
-    // build segment "cards" with light styling; each card gets data-idx for click handling
+    // Build cards: for rows that have a known mode symbol we render the new three-line layout,
+    // otherwise fall back to the simpler existing layout.
     const html = rows.map(r => {
-      const modeKey = (String(r.mode || '')).toLowerCase();
+      const modeKey = String(r.mode || '').toLowerCase();
       const symbolName = modeSymbolMap.hasOwnProperty(modeKey) ? modeSymbolMap[modeKey] : '';
-      const iconHtml = symbolName ? `<span class="material-symbols-outlined ml-icon" style="font-size:18px;color:#444;margin-right:6px">${escapeHtml(symbolName)}</span>` : '';
-      return `<div class="ml-seg card" data-idx="${r.idx}" style="border:1px solid #e6e6e6;border-radius:8px;padding:10px;margin-bottom:8px;background:#fff;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,0.04)">
-      <div class="ml-seg-row" style="display:flex;align-items:center;gap:8px;">
-      ${iconHtml}<strong style="font-size:14px;color:#222">${escapeHtml(String(r.source))}</strong>
-      <span style="margin:0 8px;color:#999">🢒</span>
-      <strong style="font-size:14px;color:#222">${escapeHtml(String(r.target))}</strong>
+      const safeSource = escapeHtml(String(r.source));
+      const safeTarget = escapeHtml(String(r.target));
+      const safeLine = escapeHtml(String(r.line));
+      const rawCost = escapeHtml(String(r.cost));
+
+      if (symbolName) {
+        // new card layout for transport modes with an icon
+        return `<div class="ml-seg card ml-seg-transport" data-idx="${r.idx}">
+        <div class="ml-seg-top">
+        <span class="material-symbols-outlined ml-circle" aria-hidden="true">circle</span>
+        <div class="ml-seg-source" title="${safeSource}">${safeSource}</div>
+        </div>
+
+        <div class="ml-seg-middle">
+        <div class="ml-line-left">
+        <span class="material-symbols-outlined ml-icon" aria-hidden="true">${escapeHtml(symbolName)}</span>
+        <div class="ml-line-name" title="${safeLine}">${safeLine}</div>
+        </div>
+        <div class="ml-cost" data-cost="${rawCost}">${rawCost}</div>
+        </div>
+
+        <div class="ml-seg-bottom">
+        <span class="material-symbols-outlined ml-circle" aria-hidden="true">circle</span>
+        <div class="ml-seg-target" title="${safeTarget}">${safeTarget}</div>
+        </div>
+        </div>`;
+      }
+
+      // fallback — preserve previous single-line + meta layout for non-transport cards
+      return `<div class="ml-seg card" data-idx="${r.idx}">
+      <div class="ml-seg-row">
+      <strong class="ml-seg-title">${escapeHtml(String(r.source))}</strong>
+      <span class="ml-seg-arrow">🢒</span>
+      <strong class="ml-seg-title">${escapeHtml(String(r.target))}</strong>
       </div>
-      <div class="ml-seg-meta" style="font-size:12px;color:#666;margin-top:8px">
-      line: ${escapeHtml(String(r.line))} • mode: ${escapeHtml(String(r.mode))} • cost: <span class="ml-cost" data-cost="${escapeHtml(String(r.cost))}">${escapeHtml(String(r.cost))}</span>
+      <div class="ml-seg-meta">
+      line: ${escapeHtml(String(r.line))} • mode: ${escapeHtml(String(r.mode))} • cost:
+      <span class="ml-cost" data-cost="${rawCost}">${rawCost}</span>
       </div>
       </div>`;
     }).join('');
 
-    // Note: removed the modeSymbolsHtml line (mode symbol row removed as requested)
-    sidebar.innerHTML = `<div class="ml-sidebar-title">Route segments</div>${summaryHtml}${html}`;
+    const segListHtml = `<div class="ml-seg-list">${html}</div>`;
+
+    sidebar.innerHTML = `<div class="ml-sidebar-title">Route segments</div>${summaryHtml}${segListHtml}`;
 
     // attach click handlers to each card so clicking fits/zooms to that segment's geometry
     const segEls = sidebar.querySelectorAll('.ml-seg.card');
@@ -407,7 +443,6 @@ export default async function initSearchControl(map, opts = {}) {
         const feat = routeGeo.features[idx];
         if (!feat) return;
         try {
-          // use existing fitBoundsForGeoJSON helper to fit the map to this single segment
           fitBoundsForGeoJSON({ type: 'FeatureCollection', features: [feat] });
         } catch (e) {
           // ignore map errors
@@ -415,6 +450,7 @@ export default async function initSearchControl(map, opts = {}) {
       });
     });
 
+    // Format cost strings (async) for every cost element
     const costEls = sidebar.querySelectorAll('.ml-cost');
     await Promise.all(Array.from(costEls).map(async (el) => {
       const raw = el.getAttribute('data-cost');
@@ -424,13 +460,23 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   // Compute bbox and fit map to bounds for the given GeoJSON (FeatureCollection)
-  function fitBoundsForGeoJSON(gj) {
+  // Replace existing fitBoundsForGeoJSON with this implementation
+  function fitBoundsForGeoJSON(gj, opts = {}) {
     if (!gj || !Array.isArray(gj.features) || gj.features.length === 0) return;
+
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
     gj.features.forEach(f => {
       if (!f.geometry) return;
-      if (f.geometry.type === 'LineString' || f.geometry.type === 'Point' || f.geometry.type === 'MultiPoint') {
-        const coords = (f.geometry.type === 'Point') ? [f.geometry.coordinates] : (f.geometry.type === 'MultiPoint' ? f.geometry.coordinates : f.geometry.coordinates);
+      if (f.geometry.type === 'Point') {
+        const coords = [f.geometry.coordinates];
+        coords.forEach(([lng, lat]) => {
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        });
+      } else if (f.geometry.type === 'MultiPoint' || f.geometry.type === 'LineString') {
+        const coords = (f.geometry.type === 'MultiPoint') ? f.geometry.coordinates : f.geometry.coordinates;
         coords.forEach(([lng, lat]) => {
           if (lng < minLng) minLng = lng;
           if (lng > maxLng) maxLng = lng;
@@ -454,11 +500,60 @@ export default async function initSearchControl(map, opts = {}) {
         }));
       }
     });
+
     if (minLng === Infinity) return;
+
+    // Compute padding to keep geometry out of the area covered by the sidebar/control.
+    // Default top/right/bottom padding (tweak as needed)
+    const defaultPad = { top: 60, right: 60, bottom: 60, left: 60 };
+
+    function computePaddingFromSidebar() {
+      try {
+        const mapEl = map.getContainer();
+        const mapRect = mapEl.getBoundingClientRect();
+        const ctrl = document.querySelector('.map-search-container');
+        if (!ctrl) return defaultPad;
+
+        const ctrlRect = ctrl.getBoundingClientRect();
+
+        // compute how far into the map the control extends from the left
+        // (distance from map left edge to control right edge). If control is on the left,
+        // this value will be positive and we should pad the left side by that many pixels.
+        let leftOverlap = Math.max(0, Math.min(ctrlRect.right - mapRect.left, mapRect.width));
+
+        // Clamp the left padding so we don't pad more than a reasonable fraction of the map width.
+        // e.g. don't let padding exceed 60% of the map width.
+        const maxLeftPad = Math.floor(mapRect.width * 0.6);
+        if (leftOverlap > maxLeftPad) leftOverlap = maxLeftPad;
+
+        // Add a small margin so the edge of the control isn't flush with the geometry.
+        const margin = 8;
+        const leftPad = Math.round(leftOverlap + margin);
+
+        return {
+          top: defaultPad.top,
+          right: defaultPad.right,
+          bottom: defaultPad.bottom,
+          left: leftPad
+        };
+      } catch (e) {
+        return defaultPad;
+      }
+    }
+
+    const padding = opts.padding || computePaddingFromSidebar();
+
     try {
-      map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 700 });
+      map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding, duration: 700 });
     } catch (e) {
-      // ignore fit failures
+      // fallback: try a simple center/zoom with offset
+      try {
+        const centerLng = (minLng + maxLng) / 2;
+        const centerLat = (minLat + maxLat) / 2;
+        map.easeTo({ center: [centerLng, centerLat], duration: 700 });
+      } catch (e2) {
+        // ignore
+      }
     }
   }
 
@@ -502,7 +597,11 @@ export default async function initSearchControl(map, opts = {}) {
 
   async function fetchAndRenderRouteIfReady() {
     if (!selected.source || !selected.target) {
-      try { map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] }); } catch (e) {}
+      try {
+        if (map.getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
+        // clear endpoint markers too
+        if (map.getSource('search-route-ends')) map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: [] });
+      } catch (e) {}
       await updateSidebarForRoute(null);
       return;
     }
@@ -517,7 +616,7 @@ export default async function initSearchControl(map, opts = {}) {
       const routeGeo = await res.json();
       if (!routeGeo || !Array.isArray(routeGeo.features)) throw new Error('Invalid route GeoJSON');
 
-      // annotate features for mode and tram color
+      // annotate features for mode and tram color (existing logic kept)
       const palette = ['#1a73e8', '#d32f2f', '#2e7d32', '#fbc02d', '#6a1b9a', '#fb8c00', '#1e88e5', '#ec407a'];
       const tramKeys = [];
       routeGeo.features.forEach((f, idx) => {
@@ -569,11 +668,73 @@ export default async function initSearchControl(map, opts = {}) {
         }
       }
 
+      // Compute start/end point markers for each segment
+      const endPoints = [];
+      routeGeo.features.forEach((f, idx) => {
+        if (!f || !f.geometry) return;
+        // handle LineString and MultiLineString (take first/last of first LineString)
+        if (f.geometry.type === 'LineString') {
+          const coords = f.geometry.coordinates;
+          if (Array.isArray(coords) && coords.length > 0) {
+            endPoints.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: coords[0] },
+              properties: { role: 'start', seg_idx: idx }
+            });
+            endPoints.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: coords[coords.length - 1] },
+              properties: { role: 'end', seg_idx: idx }
+            });
+          }
+        } else if (f.geometry.type === 'MultiLineString') {
+          // use first and last coordinate of the flattened lines
+          const allCoords = f.geometry.coordinates.flat();
+          if (Array.isArray(allCoords) && allCoords.length > 0) {
+            endPoints.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: allCoords[0] },
+              properties: { role: 'start', seg_idx: idx }
+            });
+            endPoints.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: allCoords[allCoords.length - 1] },
+              properties: { role: 'end', seg_idx: idx }
+            });
+          }
+        } else if (f.geometry.type === 'Point') {
+          // for point segments, duplicate start/end as same location
+          const c = f.geometry.coordinates;
+          endPoints.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: c },
+            properties: { role: 'start', seg_idx: idx }
+          });
+          endPoints.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: c },
+            properties: { role: 'end', seg_idx: idx }
+          });
+        }
+      });
+
+      // create or update a dedicated source for segment endpoints
+      try {
+        if (map.getSource('search-route-ends')) {
+          map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: endPoints });
+        } else {
+          map.addSource('search-route-ends', { type: 'geojson', data: { type: 'FeatureCollection', features: endPoints } });
+        }
+      } catch (err) {
+        console.warn('Failed to add/update search-route-ends source:', err);
+      }
+
       // remove previous route layers
       try { if (map.getLayer('search-route-line-base')) map.removeLayer('search-route-line-base'); } catch (_) {}
       try { if (map.getLayer('search-route-rail-symbol')) map.removeLayer('search-route-rail-symbol'); } catch (_) {}
       try { if (map.getLayer('search-route-rail-narrow-symbol')) map.removeLayer('search-route-rail-narrow-symbol'); } catch (_) {}
       try { if (map.getLayer('search-route-line-fallback')) map.removeLayer('search-route-line-fallback'); } catch (_) {}
+      try { if (map.getLayer('search-route-ends-circle')) map.removeLayer('search-route-ends-circle'); } catch (_) {}
 
       let addedComplexLayers = false;
       try {
@@ -623,11 +784,6 @@ export default async function initSearchControl(map, opts = {}) {
           }
         });
 
-        // Instead of relying on line-pattern (which can be inconsistent across styles),
-        // render short fixed-size white squares by repeating a tiny white icon along the line
-        // using a symbol layer set to symbol-placement: 'line'. Symbol layers render icons at
-        // fixed pixel sizes, so they won't scale with zoom.
-
         // Standard railway symbol-repeat (8px spacing)
         if (map.hasImage && map.hasImage('ml-rail-pattern')) {
           map.addLayer({
@@ -648,7 +804,6 @@ export default async function initSearchControl(map, opts = {}) {
             }
           });
         } else {
-          // fallback: dashed overlay (less ideal but avoids blank)
           map.addLayer({
             id: 'search-route-rail-symbol',
             type: 'line',
@@ -686,6 +841,22 @@ export default async function initSearchControl(map, opts = {}) {
             filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'],
             layout: { 'line-join': 'round', 'line-cap': 'butt' },
             paint: { 'line-color': '#ffffff', 'line-width': 4, 'line-dasharray': ['literal', [3, 3]], 'line-opacity': 1 }
+          });
+        }
+
+        // Add endpoint circles (white with dark stroke) on top of everything
+        if (map.getSource('search-route-ends')) {
+          map.addLayer({
+            id: 'search-route-ends-circle',
+            type: 'circle',
+            source: 'search-route-ends',
+            paint: {
+              'circle-color': '#ffffff',
+              'circle-radius': 4,
+              'circle-stroke-color': '#333',
+              'circle-stroke-width': 0.5,
+              'circle-opacity': 1
+            }
           });
         }
 
