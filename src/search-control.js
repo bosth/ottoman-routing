@@ -1,15 +1,5 @@
 import Fuse from 'fuse.js';
 
-// src/search-control.js
-// - Fixes railway rendering by using fixed-pixel symbol repeat fallback to guarantee
-//   fixed-size squares regardless of zoom. Adds small canvas images and always uses
-//   symbol layers with symbol-placement: 'line' + symbol-spacing so the squares do not scale.
-// - Makes narrow-gauge visually distinct (smaller width + smaller square tile).
-// - Zoom behavior:
-//     * the explicit point zoom helper was removed (no automatic zoom when selecting start).
-//     * when a route is displayed, map.fitBounds to the route (padding 60)
-// - Keeps the rest of the control behavior (suggestions, keyboard navigation, etc.)
-
 function loadScript(src) {
   return new Promise((resolve, reject) => {
     const s = document.createElement('script');
@@ -307,8 +297,6 @@ export default async function initSearchControl(map, opts = {}) {
     renderSuggestionsForRole(role);
   }
 
-  // Note: zoomToFeaturePoint helper removed as requested — no automatic point zoom helper here.
-
   function setSelectedFeature(role, feat) {
     if (!feat) selected[role] = null;
     else selected[role] = feat;
@@ -318,8 +306,8 @@ export default async function initSearchControl(map, opts = {}) {
     else inp.value = '';
 
     const feats = [];
-    if (selected.source) feats.push({ type: 'Feature', geometry: selected.source.geometry, properties: { role: 'source', id: selected.source.properties.id, name: selected.source.properties.name, rank: selected.source.properties.rank, shortLabel: 'S' } });
-    if (selected.target) feats.push({ type: 'Feature', geometry: selected.target.geometry, properties: { role: 'target', id: selected.target.properties.id, name: selected.target.properties.name, rank: selected.target.properties.rank, shortLabel: 'T' } });
+    if (selected.source) feats.push({ type: 'Feature', geometry: selected.source.geometry, properties: { role: 'source', id: selected.source.properties.id, name: selected.source.properties.name, shortLabel: selected.source.properties.shortLabel } });
+    if (selected.target) feats.push({ type: 'Feature', geometry: selected.target.geometry, properties: { role: 'target', id: selected.target.properties.id, name: selected.target.properties.name, shortLabel: selected.target.properties.shortLabel } });
     const fc = { type: 'FeatureCollection', features: feats };
     try {
       map.getSource('search-selected').setData(fc);
@@ -328,8 +316,6 @@ export default async function initSearchControl(map, opts = {}) {
       try { if (map.getSource && map.getSource('search-selected')) map.removeSource('search-selected'); } catch (e2) {}
       map.addSource('search-selected', { type: 'geojson', data: fc });
     }
-
-    // No automatic zoom/fly on selection (user removed zoom helper).
   }
 
   async function formatCostMinutes(mins) {
@@ -343,12 +329,7 @@ export default async function initSearchControl(map, opts = {}) {
     return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'] });
   }
 
-  // Replace/update the existing updateSidebarForRoute function with this version.
-  // It preserves previous behavior (summary, seg-list scrolling, click handlers, async cost formatting)
-  // but changes the card markup for modes that have material-symbol icons so they render as:
-  //  - top line: small circle + source
-  //  - middle line: transport icon + line name (left), cost (right)
-  //  - bottom line: small circle + target
+  // Corrected updateSidebarForRoute: renders a single-flow list with nodes once and segment names between them.
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
@@ -370,8 +351,15 @@ export default async function initSearchControl(map, opts = {}) {
       };
     });
 
-    const firstSource = rows[0] ? rows[0].source : '';
-    const lastTarget = rows[rows.length - 1] ? rows[rows.length - 1].target : '';
+    // Build node list: first source then each segment's target (nodes displayed once)
+    const nodes = [];
+    if (rows.length) {
+      nodes.push(rows[0].source);
+      rows.forEach(r => nodes.push(r.target));
+    }
+
+    const firstSource = nodes[0] || '';
+    const lastTarget = nodes[nodes.length - 1] || '';
     const totalMins = rows.reduce((acc, r) => acc + (Number(r.cost) || 0), 0);
     const totalHuman = await formatCostMinutes(totalMins);
 
@@ -383,84 +371,56 @@ export default async function initSearchControl(map, opts = {}) {
     <div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div>
     </div>`;
 
-    // Build cards: for rows that have a known mode symbol we render the new three-line layout,
-    // otherwise fall back to the simpler existing layout.
-    const html = rows.map(r => {
-      const modeKey = String(r.mode || '').toLowerCase();
-      const symbolName = modeSymbolMap.hasOwnProperty(modeKey) ? modeSymbolMap[modeKey] : '';
-      const safeSource = escapeHtml(String(r.source));
-      const safeTarget = escapeHtml(String(r.target));
-      const safeLine = escapeHtml(String(r.line));
-      const rawCost = escapeHtml(String(r.cost));
+    // Left rail markup (nodes + connectors)
+    let leftCol = '<div class="ml-flow-left" aria-hidden="true">';
+    for (let i = 0; i < nodes.length; i++) {
+      leftCol += '<div class="ml-node-wrap"><span class="ml-node"></span></div>';
+      if (i < nodes.length - 1) leftCol += '<div class="ml-connector-wrap"><span class="ml-connector"></span></div>';
+    }
+    leftCol += '</div>';
 
-      if (symbolName) {
-        // new card layout for transport modes with an icon
-        return `<div class="ml-seg card ml-seg-transport" data-idx="${r.idx}">
-        <div class="ml-seg-top">
-        <span class="material-symbols-outlined ml-circle" aria-hidden="true">circle</span>
-        <div class="ml-seg-source" title="${safeSource}">${safeSource}</div>
+    // Right column: labels and segment names between nodes
+    let rightCol = '<div class="ml-flow-right">';
+    if (nodes.length) {
+      for (let i = 0; i < rows.length; i++) {
+        rightCol += `
+        <div class="ml-node-label">${escapeHtml(String(nodes[i]))}</div>
+        <div class="ml-seg-line" data-idx="${rows[i].idx}" role="button" tabindex="0">
+        <div class="ml-seg-line-left">
+        <span class="material-symbols-outlined ml-icon-inline" aria-hidden="true">
+        ${escapeHtml(modeSymbolMap[String(rows[i].mode || '').toLowerCase()] || 'directions_walk')}
+        </span>
+        <span class="ml-seg-line-name">${escapeHtml(String(rows[i].line))}</span>
         </div>
-
-        <div class="ml-seg-middle">
-        <div class="ml-line-left">
-        <span class="material-symbols-outlined ml-icon" aria-hidden="true">${escapeHtml(symbolName)}</span>
-        <div class="ml-line-name" title="${safeLine}">${safeLine}</div>
-        </div>
-        <div class="ml-cost" data-cost="${rawCost}">${rawCost}</div>
-        </div>
-
-        <div class="ml-seg-bottom">
-        <span class="material-symbols-outlined ml-circle" aria-hidden="true">circle</span>
-        <div class="ml-seg-target" title="${safeTarget}">${safeTarget}</div>
-        </div>
+        <span class="ml-seg-line-cost">${escapeHtml(String(rows[i].cost))} min</span>
         </div>`;
       }
+      rightCol += `<div class="ml-node-label">${escapeHtml(String(nodes[nodes.length - 1]))}</div>`;
+    }
+    rightCol += '</div>';
 
-      // fallback — preserve previous single-line + meta layout for non-transport cards
-      return `<div class="ml-seg card" data-idx="${r.idx}">
-      <div class="ml-seg-row">
-      <strong class="ml-seg-title">${escapeHtml(String(r.source))}</strong>
-      <span class="ml-seg-arrow">🢒</span>
-      <strong class="ml-seg-title">${escapeHtml(String(r.target))}</strong>
-      </div>
-      <div class="ml-seg-meta">
-      line: ${escapeHtml(String(r.line))} • mode: ${escapeHtml(String(r.mode))} • cost:
-      <span class="ml-cost" data-cost="${rawCost}">${rawCost}</span>
-      </div>
-      </div>`;
-    }).join('');
+    const flowHtml = `<div class="ml-flow">${leftCol}${rightCol}</div>`;
 
-    const segListHtml = `<div class="ml-seg-list">${html}</div>`;
+    sidebar.innerHTML = `<div class="ml-sidebar-title">Route segments</div>${summaryHtml}<div class="ml-seg-list">${flowHtml}</div>`;
 
-    sidebar.innerHTML = `<div class="ml-sidebar-title">Route segments</div>${summaryHtml}${segListHtml}`;
-
-    // attach click handlers to each card so clicking fits/zooms to that segment's geometry
-    const segEls = sidebar.querySelectorAll('.ml-seg.card');
-    segEls.forEach(el => {
-      el.addEventListener('click', () => {
+    // Attach handlers for segment elements: click and keyboard
+    const segLineEls = sidebar.querySelectorAll('.ml-seg-line');
+    segLineEls.forEach(el => {
+      const clickHandler = () => {
         const idx = Number(el.getAttribute('data-idx'));
         if (isNaN(idx)) return;
         const feat = routeGeo.features[idx];
         if (!feat) return;
-        try {
-          fitBoundsForGeoJSON({ type: 'FeatureCollection', features: [feat] });
-        } catch (e) {
-          // ignore map errors
-        }
+        try { fitBoundsForGeoJSON({ type: 'FeatureCollection', features: [feat] }); } catch (e) {}
+      };
+      el.addEventListener('click', clickHandler);
+      el.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); clickHandler(); }
       });
     });
-
-    // Format cost strings (async) for every cost element
-    const costEls = sidebar.querySelectorAll('.ml-cost');
-    await Promise.all(Array.from(costEls).map(async (el) => {
-      const raw = el.getAttribute('data-cost');
-      const human = await formatCostMinutes(raw);
-      el.textContent = human;
-    }));
   }
 
   // Compute bbox and fit map to bounds for the given GeoJSON (FeatureCollection)
-  // Replace existing fitBoundsForGeoJSON with this implementation
   function fitBoundsForGeoJSON(gj, opts = {}) {
     if (!gj || !Array.isArray(gj.features) || gj.features.length === 0) return;
 
@@ -503,8 +463,6 @@ export default async function initSearchControl(map, opts = {}) {
 
     if (minLng === Infinity) return;
 
-    // Compute padding to keep geometry out of the area covered by the sidebar/control.
-    // Default top/right/bottom padding (tweak as needed)
     const defaultPad = { top: 60, right: 60, bottom: 60, left: 60 };
 
     function computePaddingFromSidebar() {
@@ -515,18 +473,9 @@ export default async function initSearchControl(map, opts = {}) {
         if (!ctrl) return defaultPad;
 
         const ctrlRect = ctrl.getBoundingClientRect();
-
-        // compute how far into the map the control extends from the left
-        // (distance from map left edge to control right edge). If control is on the left,
-        // this value will be positive and we should pad the left side by that many pixels.
         let leftOverlap = Math.max(0, Math.min(ctrlRect.right - mapRect.left, mapRect.width));
-
-        // Clamp the left padding so we don't pad more than a reasonable fraction of the map width.
-        // e.g. don't let padding exceed 60% of the map width.
         const maxLeftPad = Math.floor(mapRect.width * 0.6);
         if (leftOverlap > maxLeftPad) leftOverlap = maxLeftPad;
-
-        // Add a small margin so the edge of the control isn't flush with the geometry.
         const margin = 8;
         const leftPad = Math.round(leftOverlap + margin);
 
@@ -546,22 +495,16 @@ export default async function initSearchControl(map, opts = {}) {
     try {
       map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding, duration: 700 });
     } catch (e) {
-      // fallback: try a simple center/zoom with offset
       try {
         const centerLng = (minLng + maxLng) / 2;
         const centerLat = (minLat + maxLat) / 2;
         map.easeTo({ center: [centerLng, centerLat], duration: 700 });
-      } catch (e2) {
-        // ignore
-      }
+      } catch (e2) {}
     }
   }
 
-  // Create tiny pattern images to be used as icons for symbol-placement line repetition.
-  // These icons will be repeated at fixed pixel spacing and therefore won't scale with zoom.
   function ensureRailPatterns() {
     try {
-      // standard railway: 8x8 tile, white 4x4 square
       if (!map.hasImage || !map.hasImage('ml-rail-pattern')) {
         const size = 8;
         const c = document.createElement('canvas');
@@ -576,7 +519,6 @@ export default async function initSearchControl(map, opts = {}) {
         try { map.addImage('ml-rail-pattern', c, { pixelRatio: 1 }); } catch (e) { console.warn('addImage ml-rail-pattern failed', e); }
       }
 
-      // narrow gauge: 6x6 tile, white 3x3 square
       if (!map.hasImage || !map.hasImage('ml-rail-narrow-pattern')) {
         const size2 = 6;
         const c2 = document.createElement('canvas');
@@ -599,7 +541,6 @@ export default async function initSearchControl(map, opts = {}) {
     if (!selected.source || !selected.target) {
       try {
         if (map.getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
-        // clear endpoint markers too
         if (map.getSource('search-route-ends')) map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: [] });
       } catch (e) {}
       await updateSidebarForRoute(null);
@@ -616,7 +557,6 @@ export default async function initSearchControl(map, opts = {}) {
       const routeGeo = await res.json();
       if (!routeGeo || !Array.isArray(routeGeo.features)) throw new Error('Invalid route GeoJSON');
 
-      // annotate features for mode and tram color (existing logic kept)
       const palette = ['#1a73e8', '#d32f2f', '#2e7d32', '#fbc02d', '#6a1b9a', '#fb8c00', '#1e88e5', '#ec407a'];
       const tramKeys = [];
       routeGeo.features.forEach((f, idx) => {
@@ -635,9 +575,7 @@ export default async function initSearchControl(map, opts = {}) {
       }
       const shuffled = shuffle(palette.slice());
       const lineColorMap = {};
-      tramKeys.forEach((k, i) => {
-        lineColorMap[k] = shuffled[i % shuffled.length];
-      });
+      tramKeys.forEach((k, i) => { lineColorMap[k] = shuffled[i % shuffled.length]; });
       routeGeo.features.forEach((f, idx) => {
         const props = f.properties || {};
         const mode = String((props.mode || '')).toLowerCase();
@@ -649,7 +587,6 @@ export default async function initSearchControl(map, opts = {}) {
         f.properties = props;
       });
 
-      // ensure tile icons exist
       ensureRailPatterns();
 
       try {
@@ -662,74 +599,39 @@ export default async function initSearchControl(map, opts = {}) {
         console.error('Failed to add/update search-route source:', err && err.message ? err.message : err);
         try { if (map.getLayer('search-route-line-fallback')) map.removeLayer('search-route-line-fallback'); } catch (_) {}
         try { if (map.getSource('search-route')) map.removeSource('search-route'); } catch (_) {}
-        try { map.addSource('search-route', { type: 'geojson', data: routeGeo }); } catch (err2) {
-          console.error('Fatal: could not add search-route source:', err2 && err2.message ? err2.message : err2);
-          throw err2;
-        }
+        try { map.addSource('search-route', { type: 'geojson', data: routeGeo }); } catch (err2) { console.error('Fatal: could not add search-route source:', err2 && err2.message ? err2.message : err2); throw err2; }
       }
 
-      // Compute start/end point markers for each segment
       const endPoints = [];
       routeGeo.features.forEach((f, idx) => {
         if (!f || !f.geometry) return;
-        // handle LineString and MultiLineString (take first/last of first LineString)
         if (f.geometry.type === 'LineString') {
           const coords = f.geometry.coordinates;
           if (Array.isArray(coords) && coords.length > 0) {
-            endPoints.push({
-              type: 'Feature',
-              geometry: { type: 'Point', coordinates: coords[0] },
-              properties: { role: 'start', seg_idx: idx }
-            });
-            endPoints.push({
-              type: 'Feature',
-              geometry: { type: 'Point', coordinates: coords[coords.length - 1] },
-              properties: { role: 'end', seg_idx: idx }
-            });
+            endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: coords[0] }, properties: { role: 'start', seg_idx: idx } });
+            endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: coords[coords.length - 1] }, properties: { role: 'end', seg_idx: idx } });
           }
         } else if (f.geometry.type === 'MultiLineString') {
-          // use first and last coordinate of the flattened lines
           const allCoords = f.geometry.coordinates.flat();
           if (Array.isArray(allCoords) && allCoords.length > 0) {
-            endPoints.push({
-              type: 'Feature',
-              geometry: { type: 'Point', coordinates: allCoords[0] },
-              properties: { role: 'start', seg_idx: idx }
-            });
-            endPoints.push({
-              type: 'Feature',
-              geometry: { type: 'Point', coordinates: allCoords[allCoords.length - 1] },
-              properties: { role: 'end', seg_idx: idx }
-            });
+            endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: allCoords[0] }, properties: { role: 'start', seg_idx: idx } });
+            endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: allCoords[allCoords.length - 1] }, properties: { role: 'end', seg_idx: idx } });
           }
         } else if (f.geometry.type === 'Point') {
-          // for point segments, duplicate start/end as same location
           const c = f.geometry.coordinates;
-          endPoints.push({
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: c },
-            properties: { role: 'start', seg_idx: idx }
-          });
-          endPoints.push({
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: c },
-            properties: { role: 'end', seg_idx: idx }
-          });
+          endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: { role: 'start', seg_idx: idx } });
+          endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: { role: 'end', seg_idx: idx } });
         }
       });
 
-      // create or update a dedicated source for segment endpoints
       try {
         if (map.getSource('search-route-ends')) {
           map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: endPoints });
         } else {
           map.addSource('search-route-ends', { type: 'geojson', data: { type: 'FeatureCollection', features: endPoints } });
         }
-      } catch (err) {
-        console.warn('Failed to add/update search-route-ends source:', err);
-      }
+      } catch (err) { console.warn('Failed to add/update search-route-ends source:', err); }
 
-      // remove previous route layers
       try { if (map.getLayer('search-route-line-base')) map.removeLayer('search-route-line-base'); } catch (_) {}
       try { if (map.getLayer('search-route-rail-symbol')) map.removeLayer('search-route-rail-symbol'); } catch (_) {}
       try { if (map.getLayer('search-route-rail-narrow-symbol')) map.removeLayer('search-route-rail-narrow-symbol'); } catch (_) {}
@@ -738,126 +640,27 @@ export default async function initSearchControl(map, opts = {}) {
 
       let addedComplexLayers = false;
       try {
-        // base line (all modes)
-        map.addLayer({
-          id: 'search-route-line-base',
-          type: 'line',
-          source: 'search-route',
-          layout: {
-            'line-join': 'round',
-            'line-cap': 'round'
-          },
-          paint: {
-            'line-color': [
-              'coalesce',
-              [
-                'match',
-                ['get', 'ml_mode_lower'],
-                'connection', '#000000',
-                'transfer', '#000000',
-                'railway', '#000000',
-                'narrow-gauge railway', '#000000',
-                'road', '#ffffff',
-                'chaussee', '#ffffff',
-                'ferry', '#1a73e8',
-                'ship', '#1a73e8',
-                ['get', 'ml_color']
-              ],
-              '#1a73e8'
-            ],
-            'line-width': [
-              'case',
-              ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5,
-              ['==', ['get', 'ml_mode_lower'], 'railway'], 6,
-              ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 6,
-              ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2,
-              ['has', 'ml_color'], 4,
-              4
-            ],
-            'line-dasharray': [
-              'case',
-              ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], ['literal', [0, 4]],
-              ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship']]], ['literal', [4, 4]],
-              ['literal', [1, 0]]
-            ],
-            'line-opacity': 0.95
-          }
-        });
+        map.addLayer({ id: 'search-route-line-base', type: 'line', source: 'search-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: {
+          'line-color': [ 'coalesce', [ 'match', ['get', 'ml_mode_lower'], 'connection', '#000000', 'transfer', '#000000', 'railway', '#000000', 'narrow-gauge railway', '#000000', 'road', '#ffffff', 'chaussee', '#ffffff', 'ferry', '#1a73e8', 'ship', '#1a73e8', ['get', 'ml_color'] ], '#1a73e8' ],
+          'line-width': [ 'case', ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5, ['==', ['get', 'ml_mode_lower'], 'railway'], 6, ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 6, ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2, ['has', 'ml_color'], 4, 4 ],
+          'line-dasharray': [ 'case', ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], ['literal', [0, 4]], ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship']]], ['literal', [4, 4]], ['literal', [1, 0]] ],
+          'line-opacity': 0.95
+        } });
 
-        // Standard railway symbol-repeat (8px spacing)
         if (map.hasImage && map.hasImage('ml-rail-pattern')) {
-          map.addLayer({
-            id: 'search-route-rail-symbol',
-            type: 'symbol',
-            source: 'search-route',
-            filter: ['==', ['get', 'ml_mode_lower'], 'railway'],
-            layout: {
-              'symbol-placement': 'line',
-              'symbol-spacing': 8,
-              'icon-image': 'ml-rail-pattern',
-              'icon-size': 1,
-              'icon-allow-overlap': true,
-              'icon-ignore-placement': true
-            },
-            paint: {
-              'icon-opacity': 1
-            }
-          });
+          map.addLayer({ id: 'search-route-rail-symbol', type: 'symbol', source: 'search-route', filter: ['==', ['get', 'ml_mode_lower'], 'railway'], layout: { 'symbol-placement': 'line', 'symbol-spacing': 8, 'icon-image': 'ml-rail-pattern', 'icon-size': 1, 'icon-allow-overlap': true, 'icon-ignore-placement': true }, paint: { 'icon-opacity': 1 } });
         } else {
-          map.addLayer({
-            id: 'search-route-rail-symbol',
-            type: 'line',
-            source: 'search-route',
-            filter: ['==', ['get', 'ml_mode_lower'], 'railway'],
-            layout: { 'line-join': 'round', 'line-cap': 'butt' },
-            paint: { 'line-color': '#ffffff', 'line-width': 5, 'line-dasharray': ['literal', [4, 4]], 'line-opacity': 1 }
-          });
+          map.addLayer({ id: 'search-route-rail-symbol', type: 'line', source: 'search-route', filter: ['==', ['get', 'ml_mode_lower'], 'railway'], layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#ffffff', 'line-width': 5, 'line-dasharray': ['literal', [4, 4]], 'line-opacity': 1 } });
         }
 
-        // Narrow-gauge: smaller spacing and smaller icon
         if (map.hasImage && map.hasImage('ml-rail-narrow-pattern')) {
-          map.addLayer({
-            id: 'search-route-rail-narrow-symbol',
-            type: 'symbol',
-            source: 'search-route',
-            filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'],
-            layout: {
-              'symbol-placement': 'line',
-              'symbol-spacing': 6,
-              'icon-image': 'ml-rail-narrow-pattern',
-              'icon-size': 1,
-              'icon-allow-overlap': true,
-              'icon-ignore-placement': true
-            },
-            paint: {
-              'icon-opacity': 1
-            }
-          });
+          map.addLayer({ id: 'search-route-rail-narrow-symbol', type: 'symbol', source: 'search-route', filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], layout: { 'symbol-placement': 'line', 'symbol-spacing': 6, 'icon-image': 'ml-rail-narrow-pattern', 'icon-size': 1, 'icon-allow-overlap': true, 'icon-ignore-placement': true }, paint: { 'icon-opacity': 1 } });
         } else {
-          map.addLayer({
-            id: 'search-route-rail-narrow-symbol',
-            type: 'line',
-            source: 'search-route',
-            filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'],
-            layout: { 'line-join': 'round', 'line-cap': 'butt' },
-            paint: { 'line-color': '#ffffff', 'line-width': 4, 'line-dasharray': ['literal', [3, 3]], 'line-opacity': 1 }
-          });
+          map.addLayer({ id: 'search-route-rail-narrow-symbol', type: 'line', source: 'search-route', filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#ffffff', 'line-width': 4, 'line-dasharray': ['literal', [3, 3]], 'line-opacity': 1 } });
         }
 
-        // Add endpoint circles (white with dark stroke) on top of everything
         if (map.getSource('search-route-ends')) {
-          map.addLayer({
-            id: 'search-route-ends-circle',
-            type: 'circle',
-            source: 'search-route-ends',
-            paint: {
-              'circle-color': '#ffffff',
-              'circle-radius': 4,
-              'circle-stroke-color': '#333',
-              'circle-stroke-width': 0.5,
-              'circle-opacity': 1
-            }
-          });
+          map.addLayer({ id: 'search-route-ends-circle', type: 'circle', source: 'search-route-ends', paint: { 'circle-color': '#ffffff', 'circle-radius': 4, 'circle-stroke-color': '#333', 'circle-stroke-width': 0.5, 'circle-opacity': 1 } });
         }
 
         addedComplexLayers = true;
@@ -867,25 +670,10 @@ export default async function initSearchControl(map, opts = {}) {
       }
 
       if (!addedComplexLayers) {
-        try {
-          map.addLayer({
-            id: 'search-route-line-fallback',
-            type: 'line',
-            source: 'search-route',
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: { 'line-color': '#1a73e8', 'line-width': 4, 'line-opacity': 0.9 }
-          });
-        } catch (err) {
-          console.error('Failed to add fallback route layer:', err && err.message ? err.message : err);
-        }
+        try { map.addLayer({ id: 'search-route-line-fallback', type: 'line', source: 'search-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#1a73e8', 'line-width': 4, 'line-opacity': 0.9 } }); } catch (err) { console.error('Failed to add fallback route layer:', err && err.message ? err.message : err); }
       }
 
-      // Zoom to the full route after rendering
-      try {
-        fitBoundsForGeoJSON(routeGeo);
-      } catch (e) {
-        // ignore
-      }
+      try { fitBoundsForGeoJSON(routeGeo); } catch (e) {}
 
       await updateSidebarForRoute(routeGeo);
 

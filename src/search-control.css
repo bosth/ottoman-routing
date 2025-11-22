@@ -1,6 +1,6 @@
 /* Consolidated search-control stylesheet
  *  - includes original control look + the sidebar/card/scroll behavior
- *  - import this once from src/main.js (Vite will bundle it)
+ *  * - import this once from src/main.js (Vite will bundle it)
  */
 
 /* Outer container base */
@@ -20,8 +20,8 @@
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  max-height: calc(100vh - 24px); /* 12px top + 12px bottom buffer */
-  overflow: hidden; /* prevent container from growing past max-height */
+  max-height: calc(100vh - 24px);
+  overflow: hidden;
 }
 
 /* Stack the search boxes on top of one another (always) */
@@ -244,3 +244,164 @@
   }
 }
 
+/* ===== Flow layout appended ===== */
+:root {
+  --ml-node-slot-height: 32px;
+  --ml-connector-slot-height: 20px;
+  --ml-node-size: 12px;
+  --ml-rail-accent: #1976d2;
+}
+
+.ml-flow {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 8px 0;
+  box-sizing: border-box;
+}
+
+.ml-flow-left {
+  width: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
+  padding-top: 2px;
+}
+
+.ml-node-wrap {
+  height: var(--ml-node-slot-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+.ml-node {
+  width: var(--ml-node-size);
+  height: var(--ml-node-size);
+  border-radius: 50%;
+  border: 2px solid var(--ml-rail-accent);
+  background: #fff;
+  box-sizing: border-box;
+  display: inline-block;
+  margin: 0;
+}
+
+.ml-connector-wrap {
+  height: var(--ml-connector-slot-height);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+}
+
+.ml-connector {
+  width: 2px;
+  background: var(--ml-rail-accent);
+  height: 100%;
+  border-radius: 1px;
+  display: inline-block;
+}
+
+.ml-flow-right {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  /* no vertical gap – slot heights control spacing */
+  box-sizing: border-box;
+}
+
+.ml-node-label {
+  min-height: var(--ml-node-slot-height);
+  height: var(--ml-node-slot-height);
+  display: flex;
+  align-items: center;
+  padding: 0 4px;
+  font-size: 13px;
+  line-height: 1.2;
+  word-break: break-word;
+  box-sizing: border-box;
+  margin: 0;
+}
+
+.ml-seg-line {
+  height: var(--ml-connector-slot-height);
+  min-height: var(--ml-connector-slot-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between; /* left: line; right: cost */
+  padding: 0 4px;
+  font-size: 12px;
+  color: #0b66c2;
+  cursor: pointer;
+  user-select: none;
+  box-sizing: border-box;
+  margin-left: 6px;
+  border-left: 2px solid transparent;
+  gap: 6px;
+}
+
+.ml-seg-line-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ml-seg-line-cost {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: #222;
+  margin-left: 4px;
+}
+
+.ml-seg-line-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ml-seg-line:hover,
+.ml-seg-line:focus {
+  background: rgba(11,102,194,0.06);
+  outline: none;
+}
+
+.ml-seg-line:focus {
+  box-shadow: 0 0 0 3px rgba(11,102,194,0.10);
+  border-left-color: rgba(11,102,194,0.12);
+}
+
+.ml-icon-inline {
+  font-variation-settings: 'FILL' 0, 'wght' 100, 'GRAD' 0, 'opsz' 16;
+  font-size: 16px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+:root {
+  --ml-node-slot-height: 32px;
+  --ml-connector-slot-height: 28px; /* was 20px */
+  --ml-node-size: 12px;
+  --ml-rail-accent: #1976d2;
+}
+
+@media (max-width: 520px) {
+  :root {
+    --ml-node-slot-height: 26px;
+    --ml-connector-slot-height: 22px; /* was 16px */
+    --ml-node-size: 10px;
+  }
+  .ml-flow { gap: 8px; }
+  .ml-flow-left { width: 28px; }
+  .ml-node-wrap { height: var(--ml-node-slot-height); }
+  .ml-connector-wrap { height: var(--ml-connector-slot-height); }
+  .ml-node { width: var(--ml-node-size); height: var(--ml-node-size); }
+  .ml-seg-line { font-size: 11px; }
+}
