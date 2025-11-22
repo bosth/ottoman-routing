@@ -19,7 +19,7 @@ function ensureHumanize() {
 }
 
 function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 function resolveApiBase(opts) {
@@ -205,19 +205,19 @@ export default async function initSearchControl(map, opts = {}) {
   };
 
   const modeSymbolMap = {
-    'walk': 'directions_walk',
-    'road': 'directions_walk',
-    'chaussee': 'directions_walk',
-    'connection': 'subway_walk',
-    'transfer': 'subway_walk',
-    'switch': 'subway_walk',
-    'horse tramway': 'cable_car',
-    'electric tramway': 'tram',
-    'railway': 'train',
-    'narrow-gauge railway': 'directions_railway_2',
-    'ferry': 'directions_boat',
-    'ship': 'anchor',
-    'metro': 'funicular'
+    walk: 'directions_walk',
+    road: 'directions_walk',
+    chaussee: 'directions_walk',
+    connection: 'subway_walk',
+    transfer: 'subway_walk',
+    switch: 'subway_walk',
+      'horse tramway': 'cable_car',
+      'electric tramway': 'tram',
+      railway: 'train',
+      'narrow-gauge railway': 'directions_railway_2',
+      ferry: 'directions_boat',
+      ship: 'anchor',
+      metro: 'funicular'
   };
 
   function renderSuggestionsForRole(role) {
@@ -329,7 +329,7 @@ export default async function initSearchControl(map, opts = {}) {
     return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'] });
   }
 
-  // Sidebar: single flow of nodes + segments between them
+  // Row-based sidebar layout: each row is either a node or a segment
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
@@ -339,8 +339,7 @@ export default async function initSearchControl(map, opts = {}) {
     }
     await ensureHumanize();
 
-    // Build rows, including raw cost in minutes
-    const rows = routeGeo.features.map((f, i) => {
+    const segs = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
       return {
         idx: i,
@@ -353,22 +352,20 @@ export default async function initSearchControl(map, opts = {}) {
       };
     });
 
-    // Precompute humanized cost for each segment
-    const humanizedCosts = await Promise.all(
-      rows.map(r => formatCostMinutes(r.cost))
-    );
-
-    // Build node list: first source then each segment's target (nodes displayed once)
+    // node sequence: first source then each segment's target
     const nodes = [];
-    if (rows.length) {
-      nodes.push(rows[0].source);
-      rows.forEach(r => nodes.push(r.target));
+    if (segs.length) {
+      nodes.push(segs[0].source);
+      segs.forEach(s => nodes.push(s.target));
     }
 
     const firstSource = nodes[0] || '';
     const lastTarget = nodes[nodes.length - 1] || '';
-    const totalMins = rows.reduce((acc, r) => acc + (Number(r.cost) || 0), 0);
+    const totalMins = segs.reduce((acc, s) => acc + (Number(s.cost) || 0), 0);
     const totalHuman = await formatCostMinutes(totalMins);
+
+    // humanize each segment cost
+    const humanizedCosts = await Promise.all(segs.map(s => formatCostMinutes(s.cost)));
 
     try { container.classList.add('ml-search-fixed'); } catch (e) {}
 
@@ -378,70 +375,81 @@ export default async function initSearchControl(map, opts = {}) {
     <div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div>
     </div>`;
 
-    // Left rail markup (nodes + connectors) with per-segment color and pattern
-    let leftCol = '<div class="ml-flow-left" aria-hidden="true">';
-    for (let i = 0; i < nodes.length; i++) {
-      leftCol += '<div class="ml-node-wrap"><span class="ml-node"></span></div>';
-      if (i < nodes.length - 1) {
-        const seg = rows[i];
-        const segColor = seg ? String(seg.color || '#000000') : '#000000';
-        const modeKey = String(seg && seg.mode || '').toLowerCase();
-
-        let connectorModeClass = '';
-        if (modeKey === 'railway') connectorModeClass = 'railway';
-        else if (modeKey === 'narrow-gauge railway') connectorModeClass = 'railway-narrow';
-        else if (modeKey === 'ferry' || modeKey === 'ship') connectorModeClass = modeKey;
-        else if (modeKey === 'connection' || modeKey === 'transfer') connectorModeClass = modeKey;
-        // everything else uses solid default (no extra class)
-
-        leftCol += `
-        <div class="ml-connector-wrap">
-        <span class="ml-connector ${connectorModeClass}"
-        style="color:${escapeHtml(segColor)}"></span>
-        </div>`;
-      }
-    }
-    leftCol += '</div>';
-
-    // Right column: labels and segment names between nodes
-    let rightCol = '<div class="ml-flow-right">';
+    // Build flat list of rows: [node0, seg0, node1, seg1, ..., nodeN]
+    const rows = [];
     if (nodes.length) {
-      for (let i = 0; i < rows.length; i++) {
-        const seg = rows[i];
-        const segColor = String(seg.color || '#000000');
-        const modeKey = String(seg.mode || '').toLowerCase();
-        const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
-        ? modeSymbolMap[modeKey]
-        : 'directions_walk';
-        const humanCost = humanizedCosts[i] || '';
+      for (let i = 0; i < segs.length; i++) {
+        rows.push({ type: 'node', label: nodes[i] });
+        rows.push({
+          type: 'segment',
+          nodeAbove: nodes[i],
+          nodeBelow: nodes[i + 1],
+          idx: segs[i].idx,
+          line: segs[i].line,
+          mode: segs[i].mode,
+          color: segs[i].color,
+          costHuman: humanizedCosts[i]
+        });
+      }
+      rows.push({ type: 'node', label: nodes[nodes.length - 1] });
+    }
 
-        // Node label
-        rightCol += `<div class="ml-node-label">${escapeHtml(String(nodes[i]))}</div>`;
-
-        // Segment row
-        rightCol += `
-        <div class="ml-seg-line"
-        data-idx="${seg.idx}"
-        role="button"
-        tabindex="0">
-        <div class="ml-seg-line-left" style="color:${escapeHtml(segColor)}">
-        <span class="material-symbols-outlined ml-icon-inline" aria-hidden="true"
-        style="color:${escapeHtml(segColor)}">
-        ${escapeHtml(symbolName)}
-        </span>
-        <span class="ml-seg-line-name">${escapeHtml(String(seg.line))}</span>
+    const flowRowsHtml = rows.map(row => {
+      if (row.type === 'node') {
+        // Node row: circle + node label
+        const label = escapeHtml(String(row.label || ''));
+        return `
+        <div class="ml-flow-row ml-flow-row-node">
+        <div class="ml-flow-left">
+        <span class="ml-node"></span>
         </div>
-        <span class="ml-seg-line-cost">${escapeHtml(String(humanCost))}</span>
+        <div class="ml-flow-right ml-flow-right-node">
+        <div class="ml-node-label">${label}</div>
+        </div>
         </div>`;
       }
-      // Final node label (target)
-      rightCol += `<div class="ml-node-label">${escapeHtml(String(nodes[nodes.length - 1]))}</div>`;
-    }
-    rightCol += '</div>';
 
-    const flowHtml = `<div class="ml-flow">${leftCol}${rightCol}</div>`;
+      // Segment row: connector + icon + italic line + cost
+      const segColor = String(row.color || '#000000');
+      const modeKey = String(row.mode || '').toLowerCase();
+      const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
+      ? modeSymbolMap[modeKey]
+      : 'directions_walk';
 
-    sidebar.innerHTML = `<div class="ml-sidebar-title">Route segments</div>${summaryHtml}<div class="ml-seg-list">${flowHtml}</div>`;
+      let connectorModeClass = '';
+      if (modeKey === 'railway') connectorModeClass = 'railway';
+      else if (modeKey === 'narrow-gauge railway') connectorModeClass = 'railway-narrow';
+      else if (modeKey === 'ferry' || modeKey === 'ship') connectorModeClass = modeKey;
+      else if (modeKey === 'connection' || modeKey === 'transfer') connectorModeClass = modeKey;
+
+      return `
+      <div class="ml-flow-row ml-flow-row-seg">
+      <div class="ml-flow-left">
+      <span class="ml-connector ${connectorModeClass}"
+      style="color:${escapeHtml(segColor)}"></span>
+      </div>
+      <div class="ml-flow-right ml-flow-right-seg">
+      <div class="ml-seg-line"
+      data-idx="${row.idx}"
+      role="button"
+      tabindex="0">
+      <div class="ml-seg-line-left" style="color:${escapeHtml(segColor)}">
+      <span class="material-symbols-outlined ml-icon-inline" aria-hidden="true"
+      style="color:${escapeHtml(segColor)}">
+      ${escapeHtml(symbolName)}
+      </span>
+      <span class="ml-seg-line-name">${escapeHtml(String(row.line))}</span>
+      </div>
+      <span class="ml-seg-line-cost">${escapeHtml(String(row.costHuman))}</span>
+      </div>
+      </div>
+      </div>`;
+    }).join('');
+
+    const flowHtml = `<div class="ml-flow">${flowRowsHtml}</div>`;
+
+    // No "Route segments" title
+    sidebar.innerHTML = `${summaryHtml}<div class="ml-seg-list">${flowHtml}</div>`;
 
     // Attach handlers for segment elements: click and keyboard
     const segLineEls = sidebar.querySelectorAll('.ml-seg-line');
@@ -476,7 +484,7 @@ export default async function initSearchControl(map, opts = {}) {
           if (lat > maxLat) maxLat = lat;
         });
       } else if (f.geometry.type === 'MultiPoint' || f.geometry.type === 'LineString') {
-        const coords = (f.geometry.type === 'MultiPoint') ? f.geometry.coordinates : f.geometry.coordinates;
+        const coords = f.geometry.coordinates;
         coords.forEach(([lng, lat]) => {
           if (lng < minLng) minLng = lng;
           if (lng > maxLng) maxLng = lng;
@@ -694,56 +702,115 @@ export default async function initSearchControl(map, opts = {}) {
 
       let addedComplexLayers = false;
       try {
-        map.addLayer({ id: 'search-route-line-base', type: 'line', source: 'search-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: {
-          'line-color': [
-            'coalesce',
-            [
-              'match',
-              ['get', 'ml_mode_lower'],
-              'connection', '#000000',
-              'transfer', '#000000',
-              'railway', '#000000',
-              'narrow-gauge railway', '#000000',
-              'road', '#ffffff',
-              'chaussee', '#ffffff',
-              'ferry', '#1a73e8',
-              'ship', '#1a73e8',
-              ['get', 'ml_color']
+        map.addLayer({
+          id: 'search-route-line-base',
+          type: 'line',
+          source: 'search-route',
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': [
+              'coalesce',
+              [
+                'match',
+                ['get', 'ml_mode_lower'],
+                'connection', '#000000',
+                'transfer', '#000000',
+                'railway', '#000000',
+                'narrow-gauge railway', '#000000',
+                'road', '#ffffff',
+                'chaussee', '#ffffff',
+                'ferry', '#1a73e8',
+                'ship', '#1a73e8',
+                ['get', 'ml_color']
+              ],
+              '#1a73e8'
             ],
-            '#1a73e8'
-          ],
-          'line-width': [
-            'case',
-            ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5,
-            ['==', ['get', 'ml_mode_lower'], 'railway'], 6,
-            ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 6,
-            ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2,
-            ['has', 'ml_color'], 4,
-            4
-          ],
-          'line-dasharray': [
-            'case',
-            ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], ['literal', [0, 4]],
-            ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship']]], ['literal', [4, 4]],
-            ['literal', [1, 0]]
-          ],
-          'line-opacity': 0.95
-        } });
+            'line-width': [
+              'case',
+              ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5,
+              ['==', ['get', 'ml_mode_lower'], 'railway'], 6,
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 6,
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2,
+              ['has', 'ml_color'], 4,
+              4
+            ],
+            'line-dasharray': [
+              'case',
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], ['literal', [0, 4]],
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship']]], ['literal', [4, 4]],
+              ['literal', [1, 0]]
+            ],
+            'line-opacity': 0.95
+          }
+        });
 
         if (map.hasImage && map.hasImage('ml-rail-pattern')) {
-          map.addLayer({ id: 'search-route-rail-symbol', type: 'symbol', source: 'search-route', filter: ['==', ['get', 'ml_mode_lower'], 'railway'], layout: { 'symbol-placement': 'line', 'symbol-spacing': 8, 'icon-image': 'ml-rail-pattern', 'icon-size': 1, 'icon-allow-overlap': true, 'icon-ignore-placement': true }, paint: { 'icon-opacity': 1 } });
+          map.addLayer({
+            id: 'search-route-rail-symbol',
+            type: 'symbol',
+            source: 'search-route',
+            filter: ['==', ['get', 'ml_mode_lower'], 'railway'],
+            layout: {
+              'symbol-placement': 'line',
+              'symbol-spacing': 8,
+              'icon-image': 'ml-rail-pattern',
+              'icon-size': 1,
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true
+            },
+            paint: { 'icon-opacity': 1 }
+          });
         } else {
-          map.addLayer({ id: 'search-route-rail-symbol', type: 'line', source: 'search-route', filter: ['==', ['get', 'ml_mode_lower'], 'railway'], layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#ffffff', 'line-width': 5, 'line-dasharray': ['literal', [4, 4]], 'line-opacity': 1 } });
+          map.addLayer({
+            id: 'search-route-rail-symbol',
+            type: 'line',
+            source: 'search-route',
+            filter: ['==', ['get', 'ml_mode_lower'], 'railway'],
+            layout: { 'line-join': 'round', 'line-cap': 'butt' },
+            paint: { 'line-color': '#ffffff', 'line-width': 5, 'line-dasharray': ['literal', [4, 4]], 'line-opacity': 1 }
+          });
         }
 
         if (map.hasImage && map.hasImage('ml-rail-narrow-pattern')) {
-          map.addLayer({ id: 'search-route-rail-narrow-symbol', type: 'symbol', source: 'search-route', filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], layout: { 'symbol-placement': 'line', 'symbol-spacing': 6, 'icon-image': 'ml-rail-narrow-pattern', 'icon-size': 1, 'icon-allow-overlap': true, 'icon-ignore-placement': true }, paint: { 'icon-opacity': 1 } });
+          map.addLayer({
+            id: 'search-route-rail-narrow-symbol',
+            type: 'symbol',
+            source: 'search-route',
+            filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'],
+            layout: {
+              'symbol-placement': 'line',
+              'symbol-spacing': 6,
+              'icon-image': 'ml-rail-narrow-pattern',
+              'icon-size': 1,
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true
+            },
+            paint: { 'icon-opacity': 1 }
+          });
         } else {
-          map.addLayer({ id: 'search-route-rail-narrow-symbol', type: 'line', source: 'search-route', filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#ffffff', 'line-width': 4, 'line-dasharray': ['literal', [3, 3]], 'line-opacity': 1 } });
+          map.addLayer({
+            id: 'search-route-rail-narrow-symbol',
+            type: 'line',
+            source: 'search-route',
+            filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'],
+            layout: { 'line-join': 'round', 'line-cap': 'butt' },
+            paint: { 'line-color': '#ffffff', 'line-width': 4, 'line-dasharray': ['literal', [3, 3]], 'line-opacity': 1 }
+          });
         }
 
         if (map.getSource('search-route-ends')) {
-          map.addLayer({ id: 'search-route-ends-circle', type: 'circle', source: 'search-route-ends', paint: { 'circle-color': '#ffffff', 'circle-radius': 4, 'circle-stroke-color': '#333', 'circle-stroke-width': 0.5, 'circle-opacity': 1 } });
+          map.addLayer({
+            id: 'search-route-ends-circle',
+            type: 'circle',
+            source: 'search-route-ends',
+            paint: {
+              'circle-color': '#ffffff',
+              'circle-radius': 4,
+              'circle-stroke-color': '#333',
+              'circle-stroke-width': 0.5,
+              'circle-opacity': 1
+            }
+          });
         }
 
         addedComplexLayers = true;
@@ -753,7 +820,17 @@ export default async function initSearchControl(map, opts = {}) {
       }
 
       if (!addedComplexLayers) {
-        try { map.addLayer({ id: 'search-route-line-fallback', type: 'line', source: 'search-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#1a73e8', 'line-width': 4, 'line-opacity': 0.9 } }); } catch (err) { console.error('Failed to add fallback route layer:', err && err.message ? err.message : err); }
+        try {
+          map.addLayer({
+            id: 'search-route-line-fallback',
+            type: 'line',
+            source: 'search-route',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#1a73e8', 'line-width': 4, 'line-opacity': 0.9 }
+          });
+        } catch (err) {
+          console.error('Failed to add fallback route layer:', err && err.message ? err.message : err);
+        }
       }
 
       try { fitBoundsForGeoJSON(routeGeo); } catch (e) {}
