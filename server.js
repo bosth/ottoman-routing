@@ -18,7 +18,7 @@ if (useProxy) {
     target,
     changeOrigin: true,
     secure: target.startsWith('https'),
-    pathRewrite: { '^/api': '' }
+                                        pathRewrite: { '^/api': '' }
   }));
 }
 
@@ -26,7 +26,8 @@ if (useProxy) {
 app.use(express.static(DIST_DIR));
 
 // SPA fallback to index.html in dist
-app.get('*', (req, res) => {
+// Use a regex route to avoid path-to-regexp parsing '*' as a parameter token in some dependency versions
+app.get(/.*/, (req, res) => {
   res.sendFile(path.join(DIST_DIR, 'index.html'));
 });
 

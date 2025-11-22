@@ -1,0 +1,183 @@
+.map-search-container {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.27);
+  border-radius: 8px;
+  overflow: hidden;
+  background: white;
+  padding: 8px;
+  width: 420px;
+}
+
+/* Stack the search boxes on top of one another (always) */
+.search-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.search-col {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.search-label {
+  font-size: 12px;
+  color: #444;
+  margin-bottom: 4px;
+}
+
+.ml-input {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 14px;
+  border: 1px solid #e6e9ee;
+  border-radius: 6px;
+  outline: none;
+  transition: box-shadow 120ms ease, border-color 120ms ease;
+}
+
+/* highlighted / active input */
+.ml-input.active,
+.ml-input:focus {
+  border-color: #1976d2;
+  box-shadow: 0 0 0 3px rgba(25,118,210,0.12);
+}
+
+/* make it obvious which input role is active by tinting its label */
+.ml-input.active + .suggestions,
+.ml-input:focus + .suggestions {}
+
+/* suggestions list */
+.suggestions {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-top: 6px;
+  border-top: 1px solid #eee;
+}
+
+.suggestion {
+  padding: 8px 10px;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.suggestion.active,
+.suggestion:hover {
+  background: #f2f6fb;
+}
+
+/* keep rank-pill for other uses but not shown in search results */
+.rank-pill {
+  display: none;
+}
+
+.controls {
+  display: flex;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid #eee;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.controls .secondary {
+  background: #6c757d;
+  color: white;
+  border: none;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.small-note { font-size: 12px; color: #666; }
+
+/* Sidebar listing route segments below the search controls */
+.ml-sidebar {
+  margin-top: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+  border-top: 1px solid #eee;
+  padding-top: 8px;
+}
+
+.ml-sidebar-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+/* summary row: left = first->last, right = total cost */
+.ml-summary {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 8px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.ml-summary-left { text-align: left; }
+.ml-summary-right { text-align: right; color: #333; font-weight: 500; }
+
+/* mode symbol list below summary */
+.ml-mode-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+/* arrow separator style */
+.ml-arrow {
+  color: #666;
+  font-size: 14px;
+  margin: 0 4px;
+}
+
+.ml-seg {
+  padding: 8px;
+  border-radius: 6px;
+  background: #fafafa;
+  margin-bottom: 8px;
+  border: 1px solid #f0f0f0;
+}
+
+.ml-seg-row { margin-bottom: 6px; font-size: 13px; display:flex; align-items:center; gap:8px; }
+.ml-seg-meta { font-size: 12px; color: #555; }
+
+/* material symbol base + sizing for segment icons */
+.material-symbols-outlined {
+  font-family: 'Material Symbols Outlined';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 18px;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* icon used at start of each segment row */
+.material-symbols-outlined.ml-icon {
+  font-variation-settings: 'FILL' 0, 'wght' 100, 'GRAD' 0, 'opsz' 20;
+  font-size: 18px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+
+/* smaller inline icons used in the summary-mode list */
+.material-symbols-outlined.ml-icon-inline {
+  font-variation-settings: 'FILL' 0, 'wght' 100, 'GRAD' 0, 'opsz' 16;
+  font-size: 16px;
+  vertical-align: middle;
+}
+
+/* smaller breakpoints */
+@media (max-width: 520px) {
+  .map-search-container { width: calc(100% - 24px); left: 12px; right: 12px; }
+}
