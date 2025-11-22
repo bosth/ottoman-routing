@@ -67,8 +67,18 @@ function initMap() {
     }
   });
 
+  // Improved error logging: log the underlying error message when available
   map.on('error', (e) => {
-    console.error('Map error', e);
+    try {
+      if (e && e.error) {
+        console.error('Map error:', e.error && e.error.message ? e.error.message : e.error);
+      } else {
+        console.error('Map error:', e);
+      }
+    } catch (err) {
+      // last-resort
+      console.error('Map error (logging failure):', e, err);
+    }
   });
 }
 

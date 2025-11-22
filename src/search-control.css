@@ -62,8 +62,10 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
+  transition: background 120ms ease;
 }
 
+/* stronger visible highlight for keyboard-selected item */
 .suggestion.active,
 .suggestion:hover {
   background: #f2f6fb;
@@ -77,27 +79,12 @@
 .controls {
   display: flex;
   gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid #eee;
-  justify-content: space-between;
-  align-items: center;
 }
 
-.controls .secondary {
-  background: #6c757d;
-  color: white;
-  border: none;
-  padding: 6px 8px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.small-note { font-size: 12px; color: #666; }
-
-/* Sidebar listing route segments below the search controls */
+/* sidebar and segment styles kept as-is */
 .ml-sidebar {
-  margin-top: 10px;
-  max-height: 260px;
+  margin-top: 8px;
+  max-height: 280px;
   overflow-y: auto;
   border-top: 1px solid #eee;
   padding-top: 8px;
@@ -105,51 +92,28 @@
 
 .ml-sidebar-title {
   font-weight: 600;
+  font-size: 13px;
   margin-bottom: 8px;
-}
-
-/* summary row: left = first->last, right = total cost */
-.ml-summary {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 6px 8px;
-  margin-bottom: 8px;
-  font-weight: 600;
-}
-
-.ml-summary-left { text-align: left; }
-.ml-summary-right { text-align: right; color: #333; font-weight: 500; }
-
-/* mode symbol list below summary */
-.ml-mode-list {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  margin-bottom: 8px;
-  color: #333;
-}
-
-/* arrow separator style */
-.ml-arrow {
-  color: #666;
-  font-size: 14px;
-  margin: 0 4px;
 }
 
 .ml-seg {
-  padding: 8px;
-  border-radius: 6px;
-  background: #fafafa;
-  margin-bottom: 8px;
-  border: 1px solid #f0f0f0;
+  padding: 8px 0;
+  border-bottom: 1px solid #f2f2f2;
 }
 
-.ml-seg-row { margin-bottom: 6px; font-size: 13px; display:flex; align-items:center; gap:8px; }
-.ml-seg-meta { font-size: 12px; color: #555; }
+.ml-seg-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 
-/* material symbol base + sizing for segment icons */
+.ml-seg-meta {
+  font-size: 12px;
+  color: #666;
+  margin-top: 6px;
+}
+
+/* icons */
 .material-symbols-outlined {
   font-family: 'Material Symbols Outlined';
   font-weight: normal;
@@ -179,5 +143,9 @@
 
 /* smaller breakpoints */
 @media (max-width: 520px) {
-  .map-search-container { width: calc(100% - 24px); left: 12px; right: 12px; }
+  .map-search-container {
+    width: calc(100% - 32px);
+    left: 12px;
+    right: 12px;
+  }
 }

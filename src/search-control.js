@@ -1,6 +1,12 @@
-// src/search-control.js (updated)
-// - Labels changed to "Starting point" and "Destination" as requested.
-// - Exports default initSearchControl(map, opts) and also attaches to window for compatibility.
+// src/search-control.js
+// - Fixes railway rendering by using fixed-pixel symbol repeat fallback to guarantee
+//   fixed-size squares regardless of zoom. Adds small canvas images and always uses
+//   symbol layers with symbol-placement: 'line' + symbol-spacing so the squares do not scale.
+// - Makes narrow-gauge visually distinct (smaller width + smaller square tile).
+// - Zoom behavior:
+//     * when a user selects a start/target, map eases to that point (zoom ~14)
+//     * when a route is displayed, map.fitBounds to the route (padding 60)
+// - Keeps the rest of the control behavior (suggestions, keyboard navigation, etc.)
 import Fuse from 'fuse.js';
 
 function loadScript(src) {
@@ -191,12 +197,6 @@ export default async function initSearchControl(map, opts = {}) {
 
   if (!map.getSource('search-route')) {
     map.addSource('search-route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
-    map.addLayer({
-      id: 'search-route-line',
-      type: 'line',
-      source: 'search-route',
-      paint: { 'line-color': '#1a73e8', 'line-width': 4, 'line-opacity': 0.9 }
-    });
   }
 
   const selected = { source: null, target: null };
@@ -235,7 +235,11 @@ export default async function initSearchControl(map, opts = {}) {
     suggestionsEl.innerHTML = '';
     st.activeIndex = -1;
     const results = st.lastResults;
-    if (!results || !results.length) return;
+    if (!results || !results.length) {
+      suggestionsEl.removeAttribute('aria-activedescendant');
+      suggestionsEl.setAttribute('aria-expanded', 'false');
+      return;
+    }
 
     results.slice(0, maxSuggestions).forEach((r, idx) => {
       const item = r.item || r;
@@ -244,6 +248,9 @@ export default async function initSearchControl(map, opts = {}) {
       const row = document.createElement('div');
       row.className = 'suggestion';
       row.dataset.index = idx;
+      row.id = `ml-${role}-suggestion-${idx}`;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
       row.innerHTML = `
       <div style="flex:1">
       <strong>${escapeHtml(item.properties.name || item.properties.id || '')}</strong>
@@ -257,9 +264,23 @@ export default async function initSearchControl(map, opts = {}) {
     const items = Array.from(suggestionsEl.querySelectorAll('.suggestion'));
     if (items.length) {
       st.activeIndex = 0;
-      items.forEach((it, i) => it.classList.toggle('active', i === st.activeIndex));
+      items.forEach((it, i) => {
+        const isActive = i === st.activeIndex;
+        it.classList.toggle('active', isActive);
+        it.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
       const activeEl = items[st.activeIndex];
-      if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+      if (activeEl) {
+        suggestionsEl.setAttribute('aria-activedescendant', activeEl.id);
+        suggestionsEl.setAttribute('aria-expanded', 'true');
+        activeEl.scrollIntoView({ block: 'nearest' });
+      } else {
+        suggestionsEl.removeAttribute('aria-activedescendant');
+        suggestionsEl.setAttribute('aria-expanded', 'false');
+      }
+    } else {
+      suggestionsEl.removeAttribute('aria-activedescendant');
+      suggestionsEl.setAttribute('aria-expanded', 'false');
     }
   }
 
@@ -269,6 +290,8 @@ export default async function initSearchControl(map, opts = {}) {
       st.suggestionsEl.innerHTML = '';
       st.lastResults = [];
       st.activeIndex = -1;
+      st.suggestionsEl.removeAttribute('aria-activedescendant');
+      st.suggestionsEl.setAttribute('aria-expanded', 'false');
       return;
     }
     const raw = fuse.search(q);
@@ -281,6 +304,22 @@ export default async function initSearchControl(map, opts = {}) {
     });
     st.lastResults = raw;
     renderSuggestionsForRole(role);
+  }
+
+  // Zoom to a point when it's selected
+  function zoomToFeaturePoint(feat) {
+    if (!feat || !feat.geometry) return;
+    try {
+      if (feat.geometry.type === 'Point') {
+        const [lng, lat] = feat.geometry.coordinates;
+        map.easeTo({ center: [lng, lat], zoom: 14, duration: 600 });
+      } else {
+        // fallback: compute bbox for geometry and fit bounds
+        fitBoundsForGeoJSON({ type: 'FeatureCollection', features: [feat] });
+      }
+    } catch (e) {
+      // ignore
+    }
   }
 
   function setSelectedFeature(role, feat) {
@@ -301,6 +340,15 @@ export default async function initSearchControl(map, opts = {}) {
       try { if (map.getLayer && map.getLayer('search-selected-circle')) map.removeLayer('search-selected-circle'); } catch (e2) {}
       try { if (map.getSource && map.getSource('search-selected')) map.removeSource('search-selected'); } catch (e2) {}
       map.addSource('search-selected', { type: 'geojson', data: fc });
+    }
+
+    // Zoom to selected point (user requested)
+    if (feat) {
+      try {
+        zoomToFeaturePoint(feat);
+      } catch (e) {
+        // ignore zoom failures
+      }
     }
   }
 
@@ -370,6 +418,83 @@ export default async function initSearchControl(map, opts = {}) {
     }));
   }
 
+  // Compute bbox and fit map to bounds for the given GeoJSON (FeatureCollection)
+  function fitBoundsForGeoJSON(gj) {
+    if (!gj || !Array.isArray(gj.features) || gj.features.length === 0) return;
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    gj.features.forEach(f => {
+      if (!f.geometry) return;
+      if (f.geometry.type === 'LineString' || f.geometry.type === 'Point' || f.geometry.type === 'MultiPoint') {
+        const coords = (f.geometry.type === 'Point') ? [f.geometry.coordinates] : (f.geometry.type === 'MultiPoint' ? f.geometry.coordinates : f.geometry.coordinates);
+        coords.forEach(([lng, lat]) => {
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        });
+      } else if (f.geometry.type === 'MultiLineString') {
+        f.geometry.coordinates.forEach(line => line.forEach(([lng, lat]) => {
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        }));
+      } else if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
+        const polys = (f.geometry.type === 'Polygon') ? f.geometry.coordinates : f.geometry.coordinates.flat();
+        polys.forEach(ring => ring.forEach(([lng, lat]) => {
+          if (lng < minLng) minLng = lng;
+          if (lng > maxLng) maxLng = lng;
+          if (lat < minLat) minLat = lat;
+          if (lat > maxLat) maxLat = lat;
+        }));
+      }
+    });
+    if (minLng === Infinity) return;
+    try {
+      map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 700 });
+    } catch (e) {
+      // ignore fit failures
+    }
+  }
+
+  // Create tiny pattern images to be used as icons for symbol-placement line repetition.
+  // These icons will be repeated at fixed pixel spacing and therefore won't scale with zoom.
+  function ensureRailPatterns() {
+    try {
+      // standard railway: 8x8 tile, white 4x4 square
+      if (!map.hasImage || !map.hasImage('ml-rail-pattern')) {
+        const size = 8;
+        const c = document.createElement('canvas');
+        c.width = size;
+        c.height = size;
+        const ctx = c.getContext('2d');
+        ctx.clearRect(0, 0, size, size);
+        ctx.fillStyle = '#ffffff';
+        const sq = 4;
+        const off = Math.floor((size - sq) / 2);
+        ctx.fillRect(off, off, sq, sq);
+        try { map.addImage('ml-rail-pattern', c, { pixelRatio: 1 }); } catch (e) { console.warn('addImage ml-rail-pattern failed', e); }
+      }
+
+      // narrow gauge: 6x6 tile, white 3x3 square
+      if (!map.hasImage || !map.hasImage('ml-rail-narrow-pattern')) {
+        const size2 = 6;
+        const c2 = document.createElement('canvas');
+        c2.width = size2;
+        c2.height = size2;
+        const ctx2 = c2.getContext('2d');
+        ctx2.clearRect(0, 0, size2, size2);
+        ctx2.fillStyle = '#ffffff';
+        const sq2 = 3;
+        const off2 = Math.floor((size2 - sq2) / 2);
+        ctx2.fillRect(off2, off2, sq2, sq2);
+        try { map.addImage('ml-rail-narrow-pattern', c2, { pixelRatio: 1 }); } catch (e) { console.warn('addImage ml-rail-narrow-pattern failed', e); }
+      }
+    } catch (err) {
+      console.warn('Rail pattern creation failed:', err);
+    }
+  }
+
   async function fetchAndRenderRouteIfReady() {
     if (!selected.source || !selected.target) {
       try { map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] }); } catch (e) {}
@@ -386,44 +511,211 @@ export default async function initSearchControl(map, opts = {}) {
       if (!res.ok) throw new Error('Route fetch failed: ' + res.status);
       const routeGeo = await res.json();
       if (!routeGeo || !Array.isArray(routeGeo.features)) throw new Error('Invalid route GeoJSON');
+
+      // annotate features for mode and tram color
+      const palette = ['#1a73e8', '#d32f2f', '#2e7d32', '#fbc02d', '#6a1b9a', '#fb8c00', '#1e88e5', '#ec407a'];
+      const tramKeys = [];
+      routeGeo.features.forEach((f, idx) => {
+        const mode = String((f.properties && f.properties.mode) || '').toLowerCase();
+        if (mode.includes('tramway') || mode.includes('metro')) {
+          const key = String((f.properties && (f.properties.line || f.properties.id)) || `__line_${idx}`);
+          if (!tramKeys.includes(key)) tramKeys.push(key);
+        }
+      });
+      function shuffle(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
+      }
+      const shuffled = shuffle(palette.slice());
+      const lineColorMap = {};
+      tramKeys.forEach((k, i) => {
+        lineColorMap[k] = shuffled[i % shuffled.length];
+      });
+      routeGeo.features.forEach((f, idx) => {
+        const props = f.properties || {};
+        const mode = String((props.mode || '')).toLowerCase();
+        props.ml_mode_lower = mode;
+        if (mode.includes('tramway') || mode.includes('metro')) {
+          const key = String(props.line || props.id || `__line_${idx}`);
+          props.ml_color = lineColorMap[key] || shuffled[idx % shuffled.length];
+        }
+        f.properties = props;
+      });
+
+      // ensure tile icons exist
+      ensureRailPatterns();
+
       try {
-        map.getSource('search-route').setData(routeGeo);
-      } catch (e) {
-        try { if (map.getLayer && map.getLayer('search-route-line')) map.removeLayer('search-route-line'); } catch (e2) {}
-        try { if (map.getSource && map.getSource('search-route')) map.removeSource('search-route'); } catch (e2) {}
-        map.addSource('search-route', { type: 'geojson', data: routeGeo });
-        map.addLayer({
-          id: 'search-route-line',
-          type: 'line',
-          source: 'search-route',
-          paint: { 'line-color': '#1a73e8', 'line-width': 4, 'line-opacity': 0.9 }
-        });
+        if (map.getSource('search-route')) {
+          map.getSource('search-route').setData(routeGeo);
+        } else {
+          map.addSource('search-route', { type: 'geojson', data: routeGeo });
+        }
+      } catch (err) {
+        console.error('Failed to add/update search-route source:', err && err.message ? err.message : err);
+        try { if (map.getLayer('search-route-line-fallback')) map.removeLayer('search-route-line-fallback'); } catch (_) {}
+        try { if (map.getSource('search-route')) map.removeSource('search-route'); } catch (_) {}
+        try { map.addSource('search-route', { type: 'geojson', data: routeGeo }); } catch (err2) {
+          console.error('Fatal: could not add search-route source:', err2 && err2.message ? err2.message : err2);
+          throw err2;
+        }
       }
 
-      (function fitBoundsForGeoJSON(gj) {
-        if (!gj || !Array.isArray(gj.features) || gj.features.length === 0) return;
-        let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-        gj.features.forEach(f => {
-          if (!f.geometry) return;
-          if (f.geometry.type === 'LineString' || f.geometry.type === 'Point') {
-            const coords = f.geometry.type === 'Point' ? [f.geometry.coordinates] : f.geometry.coordinates;
-            coords.forEach(([lng, lat]) => {
-              if (lng < minLng) minLng = lng;
-              if (lng > maxLng) maxLng = lng;
-              if (lat < minLat) minLat = lat;
-              if (lat > maxLat) maxLat = lat;
-            });
+      // remove previous route layers
+      try { if (map.getLayer('search-route-line-base')) map.removeLayer('search-route-line-base'); } catch (_) {}
+      try { if (map.getLayer('search-route-rail-symbol')) map.removeLayer('search-route-rail-symbol'); } catch (_) {}
+      try { if (map.getLayer('search-route-rail-narrow-symbol')) map.removeLayer('search-route-rail-narrow-symbol'); } catch (_) {}
+      try { if (map.getLayer('search-route-line-fallback')) map.removeLayer('search-route-line-fallback'); } catch (_) {}
+
+      let addedComplexLayers = false;
+      try {
+        // base line (all modes)
+        map.addLayer({
+          id: 'search-route-line-base',
+          type: 'line',
+          source: 'search-route',
+          layout: {
+            'line-join': 'round',
+            'line-cap': 'round'
+          },
+          paint: {
+            'line-color': [
+              'coalesce',
+              [
+                'match',
+                ['get', 'ml_mode_lower'],
+                'connection', '#000000',
+                'transfer', '#000000',
+                'railway', '#000000',
+                'narrow-gauge railway', '#000000',
+                'road', '#ffffff',
+                'chaussee', '#ffffff',
+                'ferry', '#1a73e8',
+                'ship', '#1a73e8',
+                ['get', 'ml_color']
+              ],
+              '#1a73e8'
+            ],
+            'line-width': [
+              'case',
+              ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5,
+              ['==', ['get', 'ml_mode_lower'], 'railway'], 6,
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 6,
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2,
+              ['has', 'ml_color'], 4,
+              4
+            ],
+            'line-dasharray': [
+              'case',
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], ['literal', [0, 4]],
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship']]], ['literal', [4, 4]],
+              ['literal', [1, 0]]
+            ],
+            'line-opacity': 0.95
           }
         });
-        if (minLng === Infinity) return;
-        map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 60, duration: 700 });
-      })(routeGeo);
+
+        // Instead of relying on line-pattern (which can be inconsistent across styles),
+        // render short fixed-size white squares by repeating a tiny white icon along the line
+        // using a symbol layer set to symbol-placement: 'line'. Symbol layers render icons at
+        // fixed pixel sizes, so they won't scale with zoom.
+
+        // Standard railway symbol-repeat (8px spacing)
+        if (map.hasImage && map.hasImage('ml-rail-pattern')) {
+          map.addLayer({
+            id: 'search-route-rail-symbol',
+            type: 'symbol',
+            source: 'search-route',
+            filter: ['==', ['get', 'ml_mode_lower'], 'railway'],
+            layout: {
+              'symbol-placement': 'line',
+              'symbol-spacing': 8,
+              'icon-image': 'ml-rail-pattern',
+              'icon-size': 1,
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true
+            },
+            paint: {
+              'icon-opacity': 1
+            }
+          });
+        } else {
+          // fallback: dashed overlay (less ideal but avoids blank)
+          map.addLayer({
+            id: 'search-route-rail-symbol',
+            type: 'line',
+            source: 'search-route',
+            filter: ['==', ['get', 'ml_mode_lower'], 'railway'],
+            layout: { 'line-join': 'round', 'line-cap': 'butt' },
+            paint: { 'line-color': '#ffffff', 'line-width': 5, 'line-dasharray': ['literal', [4, 4]], 'line-opacity': 1 }
+          });
+        }
+
+        // Narrow-gauge: smaller spacing and smaller icon
+        if (map.hasImage && map.hasImage('ml-rail-narrow-pattern')) {
+          map.addLayer({
+            id: 'search-route-rail-narrow-symbol',
+            type: 'symbol',
+            source: 'search-route',
+            filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'],
+            layout: {
+              'symbol-placement': 'line',
+              'symbol-spacing': 6,
+              'icon-image': 'ml-rail-narrow-pattern',
+              'icon-size': 1,
+              'icon-allow-overlap': true,
+              'icon-ignore-placement': true
+            },
+            paint: {
+              'icon-opacity': 1
+            }
+          });
+        } else {
+          map.addLayer({
+            id: 'search-route-rail-narrow-symbol',
+            type: 'line',
+            source: 'search-route',
+            filter: ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'],
+            layout: { 'line-join': 'round', 'line-cap': 'butt' },
+            paint: { 'line-color': '#ffffff', 'line-width': 4, 'line-dasharray': ['literal', [3, 3]], 'line-opacity': 1 }
+          });
+        }
+
+        addedComplexLayers = true;
+      } catch (err) {
+        console.error('Adding complex route layers failed:', err && err.message ? err.message : err);
+        addedComplexLayers = false;
+      }
+
+      if (!addedComplexLayers) {
+        try {
+          map.addLayer({
+            id: 'search-route-line-fallback',
+            type: 'line',
+            source: 'search-route',
+            layout: { 'line-join': 'round', 'line-cap': 'round' },
+            paint: { 'line-color': '#1a73e8', 'line-width': 4, 'line-opacity': 0.9 }
+          });
+        } catch (err) {
+          console.error('Failed to add fallback route layer:', err && err.message ? err.message : err);
+        }
+      }
+
+      // Zoom to the full route after rendering
+      try {
+        fitBoundsForGeoJSON(routeGeo);
+      } catch (e) {
+        // ignore
+      }
 
       await updateSidebarForRoute(routeGeo);
 
       statusEl.textContent = 'Route loaded';
     } catch (err) {
-      console.error('Failed to fetch/render route:', err);
+      console.error('Failed to fetch/render route:', err && err.message ? err.message : err);
       statusEl.textContent = 'Error loading route';
       await updateSidebarForRoute(null);
     }
@@ -438,6 +730,8 @@ export default async function initSearchControl(map, opts = {}) {
     st.suggestionsEl.innerHTML = '';
     st.lastResults = [];
     st.activeIndex = -1;
+    st.suggestionsEl.removeAttribute('aria-activedescendant');
+    st.suggestionsEl.setAttribute('aria-expanded', 'false');
     if (role === 'source') {
       setTimeout(() => { state.target.input.focus(); }, 0);
     } else {
@@ -448,6 +742,9 @@ export default async function initSearchControl(map, opts = {}) {
 
   Object.keys(state).forEach(role => {
     const st = state[role];
+
+    st.suggestionsEl.setAttribute('role', 'listbox');
+    st.suggestionsEl.setAttribute('aria-expanded', 'false');
 
     st.input.addEventListener('focus', () => {
       activeRole = role;
@@ -498,9 +795,18 @@ export default async function initSearchControl(map, opts = {}) {
         else st.activeIndex += (key === 'ArrowDown' ? 1 : -1);
         if (st.activeIndex < 0) st.activeIndex = items.length - 1;
         if (st.activeIndex >= items.length) st.activeIndex = 0;
-        items.forEach((it, i) => it.classList.toggle('active', i === st.activeIndex));
+        items.forEach((it, i) => {
+          const isActive = i === st.activeIndex;
+          it.classList.toggle('active', isActive);
+          it.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        });
         const activeEl = items[st.activeIndex];
-        if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+        if (activeEl) {
+          st.suggestionsEl.setAttribute('aria-activedescendant', activeEl.id);
+          activeEl.scrollIntoView({ block: 'nearest' });
+        } else {
+          st.suggestionsEl.removeAttribute('aria-activedescendant');
+        }
       }
     });
   });
@@ -516,6 +822,8 @@ export default async function initSearchControl(map, opts = {}) {
       activeRole = null;
       state.source.input.classList.remove('active');
       state.target.input.classList.remove('active');
+      sourceSug.removeAttribute('aria-activedescendant');
+      targetSug.removeAttribute('aria-activedescendant');
     }
   });
 
@@ -532,6 +840,8 @@ export default async function initSearchControl(map, opts = {}) {
     state[activeRole].lastResults = [];
     state[activeRole].activeIndex = -1;
     try { state[activeRole].input.focus(); } catch (e) {}
+    state[activeRole].suggestionsEl.removeAttribute('aria-activedescendant');
+    state[activeRole].suggestionsEl.setAttribute('aria-expanded', 'false');
     fetchAndRenderRouteIfReady().catch(console.error);
   });
 
@@ -586,12 +896,12 @@ function createContainerHTML() {
   <div class="search-col">
   <label class="search-label">Starting point</label>
   <input id="mlSourceBox" class="ml-input" placeholder="Search starting point..." autocomplete="off" />
-  <div class="suggestions" id="mlSourceSuggestions" role="listbox"></div>
+  <div class="suggestions" id="mlSourceSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
   <div class="search-col">
   <label class="search-label">Destination</label>
   <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
-  <div class="suggestions" id="mlTargetSuggestions" role="listbox"></div>
+  <div class="suggestions" id="mlTargetSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
   </div>
   <div class="controls">
