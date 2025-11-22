@@ -329,7 +329,7 @@ export default async function initSearchControl(map, opts = {}) {
     return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'] });
   }
 
-  // Corrected updateSidebarForRoute: renders a single-flow list with nodes once and segment names between them.
+  // Sidebar: single flow of nodes + segments between them
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
@@ -339,6 +339,7 @@ export default async function initSearchControl(map, opts = {}) {
     }
     await ensureHumanize();
 
+    // Build rows, including raw cost in minutes
     const rows = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
       return {
@@ -347,9 +348,15 @@ export default async function initSearchControl(map, opts = {}) {
         target: p.target ?? p.tgt ?? '',
         line: p.line ?? p.name ?? '',
         mode: (p.mode ?? '').toLowerCase(),
-                                       cost: p.cost ?? 0
+                                       cost: p.cost ?? 0,
+                                       color: p.ml_sidebar_color || '#000000'
       };
     });
+
+    // Precompute humanized cost for each segment
+    const humanizedCosts = await Promise.all(
+      rows.map(r => formatCostMinutes(r.cost))
+    );
 
     // Build node list: first source then each segment's target (nodes displayed once)
     const nodes = [];
@@ -371,11 +378,28 @@ export default async function initSearchControl(map, opts = {}) {
     <div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div>
     </div>`;
 
-    // Left rail markup (nodes + connectors)
+    // Left rail markup (nodes + connectors) with per-segment color and pattern
     let leftCol = '<div class="ml-flow-left" aria-hidden="true">';
     for (let i = 0; i < nodes.length; i++) {
       leftCol += '<div class="ml-node-wrap"><span class="ml-node"></span></div>';
-      if (i < nodes.length - 1) leftCol += '<div class="ml-connector-wrap"><span class="ml-connector"></span></div>';
+      if (i < nodes.length - 1) {
+        const seg = rows[i];
+        const segColor = seg ? String(seg.color || '#000000') : '#000000';
+        const modeKey = String(seg && seg.mode || '').toLowerCase();
+
+        let connectorModeClass = '';
+        if (modeKey === 'railway') connectorModeClass = 'railway';
+        else if (modeKey === 'narrow-gauge railway') connectorModeClass = 'railway-narrow';
+        else if (modeKey === 'ferry' || modeKey === 'ship') connectorModeClass = modeKey;
+        else if (modeKey === 'connection' || modeKey === 'transfer') connectorModeClass = modeKey;
+        // everything else uses solid default (no extra class)
+
+        leftCol += `
+        <div class="ml-connector-wrap">
+        <span class="ml-connector ${connectorModeClass}"
+        style="color:${escapeHtml(segColor)}"></span>
+        </div>`;
+      }
     }
     leftCol += '</div>';
 
@@ -383,18 +407,34 @@ export default async function initSearchControl(map, opts = {}) {
     let rightCol = '<div class="ml-flow-right">';
     if (nodes.length) {
       for (let i = 0; i < rows.length; i++) {
+        const seg = rows[i];
+        const segColor = String(seg.color || '#000000');
+        const modeKey = String(seg.mode || '').toLowerCase();
+        const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
+        ? modeSymbolMap[modeKey]
+        : 'directions_walk';
+        const humanCost = humanizedCosts[i] || '';
+
+        // Node label
+        rightCol += `<div class="ml-node-label">${escapeHtml(String(nodes[i]))}</div>`;
+
+        // Segment row
         rightCol += `
-        <div class="ml-node-label">${escapeHtml(String(nodes[i]))}</div>
-        <div class="ml-seg-line" data-idx="${rows[i].idx}" role="button" tabindex="0">
-        <div class="ml-seg-line-left">
-        <span class="material-symbols-outlined ml-icon-inline" aria-hidden="true">
-        ${escapeHtml(modeSymbolMap[String(rows[i].mode || '').toLowerCase()] || 'directions_walk')}
+        <div class="ml-seg-line"
+        data-idx="${seg.idx}"
+        role="button"
+        tabindex="0">
+        <div class="ml-seg-line-left" style="color:${escapeHtml(segColor)}">
+        <span class="material-symbols-outlined ml-icon-inline" aria-hidden="true"
+        style="color:${escapeHtml(segColor)}">
+        ${escapeHtml(symbolName)}
         </span>
-        <span class="ml-seg-line-name">${escapeHtml(String(rows[i].line))}</span>
+        <span class="ml-seg-line-name">${escapeHtml(String(seg.line))}</span>
         </div>
-        <span class="ml-seg-line-cost">${escapeHtml(String(rows[i].cost))} min</span>
+        <span class="ml-seg-line-cost">${escapeHtml(String(humanCost))}</span>
         </div>`;
       }
+      // Final node label (target)
       rightCol += `<div class="ml-node-label">${escapeHtml(String(nodes[nodes.length - 1]))}</div>`;
     }
     rightCol += '</div>';
@@ -584,6 +624,20 @@ export default async function initSearchControl(map, opts = {}) {
           const key = String(props.line || props.id || `__line_${idx}`);
           props.ml_color = lineColorMap[key] || shuffled[idx % shuffled.length];
         }
+
+        // Sidebar color: default black, override for some modes
+        let sidebarColor;
+        if (mode === 'railway' || mode === 'narrow-gauge railway') {
+          sidebarColor = '#000000';
+        } else if (mode === 'ferry' || mode === 'ship') {
+          sidebarColor = '#1a73e8'; // copy map's blue for water modes
+        } else if (props.ml_color) {
+          sidebarColor = props.ml_color; // tram/metro palette
+        } else {
+          sidebarColor = '#000000'; // everything else: black
+        }
+        props.ml_sidebar_color = sidebarColor;
+
         f.properties = props;
       });
 
@@ -641,9 +695,38 @@ export default async function initSearchControl(map, opts = {}) {
       let addedComplexLayers = false;
       try {
         map.addLayer({ id: 'search-route-line-base', type: 'line', source: 'search-route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: {
-          'line-color': [ 'coalesce', [ 'match', ['get', 'ml_mode_lower'], 'connection', '#000000', 'transfer', '#000000', 'railway', '#000000', 'narrow-gauge railway', '#000000', 'road', '#ffffff', 'chaussee', '#ffffff', 'ferry', '#1a73e8', 'ship', '#1a73e8', ['get', 'ml_color'] ], '#1a73e8' ],
-          'line-width': [ 'case', ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5, ['==', ['get', 'ml_mode_lower'], 'railway'], 6, ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 6, ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2, ['has', 'ml_color'], 4, 4 ],
-          'line-dasharray': [ 'case', ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], ['literal', [0, 4]], ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship']]], ['literal', [4, 4]], ['literal', [1, 0]] ],
+          'line-color': [
+            'coalesce',
+            [
+              'match',
+              ['get', 'ml_mode_lower'],
+              'connection', '#000000',
+              'transfer', '#000000',
+              'railway', '#000000',
+              'narrow-gauge railway', '#000000',
+              'road', '#ffffff',
+              'chaussee', '#ffffff',
+              'ferry', '#1a73e8',
+              'ship', '#1a73e8',
+              ['get', 'ml_color']
+            ],
+            '#1a73e8'
+          ],
+          'line-width': [
+            'case',
+            ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5,
+            ['==', ['get', 'ml_mode_lower'], 'railway'], 6,
+            ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 6,
+            ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2,
+            ['has', 'ml_color'], 4,
+            4
+          ],
+          'line-dasharray': [
+            'case',
+            ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], ['literal', [0, 4]],
+            ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship']]], ['literal', [4, 4]],
+            ['literal', [1, 0]]
+          ],
           'line-opacity': 0.95
         } });
 
