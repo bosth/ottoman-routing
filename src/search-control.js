@@ -1,3 +1,8 @@
+// src/search-control.js
+// Original search + routing UI/logic, modified to NOT restyle all nodes.
+// It uses the nodes provided by main.js for base styling and only adds
+// selection + route layers + UI.
+
 import Fuse from 'fuse.js';
 
 function loadScript(src) {
@@ -60,6 +65,7 @@ export default async function initSearchControl(map, opts = {}) {
   const apiBase = resolveApiBase(opts);
   const maxSuggestions = opts.maxSuggestions || 8;
 
+  // Create / reuse the fixed-position UI container
   const existing = map.getContainer().querySelector('.map-search-container');
   let container = existing;
   if (!container) {
@@ -108,50 +114,9 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   const allFeatures = normalizeFeatures(geojson.features || []);
-  const nodesSourceData = { type: 'FeatureCollection', features: allFeatures };
 
-  try {
-    if (map.getSource('nodes-search')) {
-      map.getSource('nodes-search').setData(nodesSourceData);
-    } else {
-      map.addSource('nodes-search', { type: 'geojson', data: nodesSourceData });
-      map.addLayer({
-        id: 'nodes-search-circle',
-        type: 'circle',
-        source: 'nodes-search',
-        paint: {
-          'circle-radius': ['interpolate', ['linear'], ['get', 'rank'], 1, 8, 50, 3],
-          'circle-color': ['step', ['get', 'rank'], '#d9534f', 2, '#f0ad4e', 5, '#5bc0de', 10, '#6c757d'],
-          'circle-opacity': 0.8,
-          'circle-stroke-width': 0.6,
-          'circle-stroke-color': '#222'
-        }
-      });
-    }
-  } catch (e) {
-    console.warn('nodes layer issue:', e);
-  }
-
-  try {
-    if (!map.getLayer('nodes-search-label')) {
-      map.addLayer({
-        id: 'nodes-search-label',
-        type: 'symbol',
-        source: 'nodes-search',
-        layout: {
-          'text-field': ['coalesce', ['get', 'name'], ['get', 'id']],
-          'text-size': 11,
-          'text-offset': [0, 1.2],
-          'text-anchor': 'top'
-        },
-        paint: {
-          'text-color': '#222'
-        }
-      });
-    }
-  } catch (e) {
-    console.warn('nodes label layer issue:', e);
-  }
+  // NOTE: we do NOT add any global node styling here anymore.
+  // main.js is responsible for base node styling (nodes / nodes-symbol / nodes-label).
 
   const fuse = new Fuse(allFeatures, {
     keys: ['properties.name', 'properties.id'],
@@ -356,10 +321,7 @@ export default async function initSearchControl(map, opts = {}) {
     return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'], largest: 2 });
   }
 
-  // Row-based sidebar layout: each row is either a node or a segment.
-  // Special case:
-  //   A "switch" segment (line name 'switch', case-insensitive) that is a self-loop
-  //   (source === target) will be merged into the *following* node row.
+  // === Sidebar / route rendering (unchanged from repo) ===
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
@@ -369,7 +331,6 @@ export default async function initSearchControl(map, opts = {}) {
     }
     await ensureHumanize();
 
-    // Normalize segments
     const segs = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
       return {
@@ -389,10 +350,9 @@ export default async function initSearchControl(map, opts = {}) {
       return;
     }
 
-    // Build nodes: first source, then each segment's target
     const nodes = [];
     nodes.push(segs[0].source);
-    segs.forEach(s => nodes.push(s.target)); // length = segs.length + 1
+    segs.forEach(s => nodes.push(s.target));
 
     const firstSource = nodes[0] || '';
     const lastTarget = nodes[nodes.length - 1] || '';
@@ -409,13 +369,13 @@ export default async function initSearchControl(map, opts = {}) {
     <div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div>
     </div>`;
 
-    // 1. Build a step timeline:
+    const modeSymbolMapLocal = modeSymbolMap;
+
     const steps = [];
     const isSwitchSeg = seg =>
     String(seg.line || '').toLowerCase() === 'switch' &&
     String(seg.source || '') === String(seg.target || '');
 
-    // Start with first node
     steps.push({ kind: 'node', label: nodes[0] });
 
     for (let i = 0; i < segs.length; i++) {
@@ -441,7 +401,6 @@ export default async function initSearchControl(map, opts = {}) {
       });
     }
 
-    // 2. Walk steps and merge self-loop switch into node rows (data only; not displayed)
     const rows = [];
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -488,7 +447,6 @@ export default async function initSearchControl(map, opts = {}) {
       }
     }
 
-    // 3. Render to HTML: node rows without (switch) text/cost; segment rows with two text lines
     const flowRowsHtml = rows.map(row => {
       if (row.type === 'node') {
         const label = escapeHtml(String(row.label || ''));
@@ -505,12 +463,10 @@ export default async function initSearchControl(map, opts = {}) {
         </div>`;
       }
 
-      // Segment row
-      // Segment row
       const segColor = String(row.color || '#000000');
       const modeKey = String(row.mode || '').toLowerCase();
-      const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
-      ? modeSymbolMap[modeKey]
+      const symbolName = modeSymbolMapLocal.hasOwnProperty(modeKey)
+      ? modeSymbolMapLocal[modeKey]
       : 'directions_walk';
 
       let connectorModeClass = '';
@@ -519,7 +475,6 @@ export default async function initSearchControl(map, opts = {}) {
       else if (modeKey === 'ferry' || modeKey === 'ship') connectorModeClass = modeKey;
       else if (modeKey === 'connection' || modeKey === 'transfer') connectorModeClass = modeKey;
 
-      // ALWAYS have a second line; for 'transfer' make the text empty
       const modeLabel = (modeKey === 'transfer')
       ? ''
       : escapeHtml(modeKey || '');
@@ -555,7 +510,6 @@ export default async function initSearchControl(map, opts = {}) {
 
     sidebar.innerHTML = `${summaryHtml}<div class="ml-seg-list">${flowHtml}</div>`;
 
-    // Segment row interactions
     const segLineEls = sidebar.querySelectorAll('.ml-seg-line');
     segLineEls.forEach(el => {
       const clickHandler = () => {
@@ -572,7 +526,6 @@ export default async function initSearchControl(map, opts = {}) {
     });
   }
 
-  // Compute bbox and fit map to bounds
   function fitBoundsForGeoJSON(gj, opts = {}) {
     if (!gj || !Array.isArray(gj.features) || gj.features.length === 0) return;
 
@@ -990,7 +943,6 @@ export default async function initSearchControl(map, opts = {}) {
     st.suggestionsEl.removeAttribute('aria-activedescendant');
     st.suggestionsEl.setAttribute('aria-expanded', 'false');
 
-    // New behavior: if both selected, fetch route; otherwise focus the other empty box
     if (role === 'source' && !selected.target) {
       setTimeout(() => { state.target.input.focus(); }, 0);
     } else if (role === 'target' && !selected.source) {
@@ -1087,9 +1039,10 @@ export default async function initSearchControl(map, opts = {}) {
     }
   });
 
+  // IMPORTANT: click selection now uses your 'nodes-symbol' layer
   map.on('click', (ev) => {
     if (!activeRole) return;
-    const features = map.queryRenderedFeatures(ev.point, { layers: ['nodes-search-circle', 'search-selected-circle'] });
+    const features = map.queryRenderedFeatures(ev.point, { layers: ['nodes-symbol', 'search-selected-circle'] });
     if (!features || !features.length) return;
     const f = features[0];
     const nodeId = (f.properties && (f.properties.id ?? f.properties.ID ?? f.id)) || '';

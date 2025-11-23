@@ -1,10 +1,9 @@
-// src/main.js - Vite entry (consolidated)
-// - imports the bundled search control and CSS from src/
-// - does NOT inject fonts (index.html is authoritative)
+// src/main.js
+// MapLibre entry + base node styling + search control
+
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// Import control and css so Vite bundles them
 import './search-control.css';
 import initSearchControl from './search-control.js';
 
@@ -26,10 +25,14 @@ document.head.appendChild(style);
 root.innerHTML = `<div id="map" aria-label="Map"></div>`;
 
 function resolveApiBase() {
-  const buildBase = (import.meta && import.meta.env && import.meta.env.VITE_API_BASE) ? import.meta.env.VITE_API_BASE : '';
+  const buildBase = (import.meta && import.meta.env && import.meta.env.VITE_API_BASE)
+    ? import.meta.env.VITE_API_BASE
+    : '';
   return (buildBase && buildBase !== '') ? buildBase.replace(/\/$/, '') :
-  (window.__API_BASE__ ? String(window.__API_BASE__).replace(/\/$/, '') :
-  ((location.hostname === 'localhost' || location.hostname === '127.0.0.1') ? 'http://localhost:8080' : 'https://geo.jaxartes.net'));
+    (window.__API_BASE__ ? String(window.__API_BASE__).replace(/\/$/, '') :
+      ((location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+        ? 'http://localhost:8080'
+        : 'https://geo.jaxartes.net'));
 }
 
 function initMap() {
@@ -45,21 +48,109 @@ function initMap() {
     zoom: 10
   });
 
+  // Optional: keep a handle for debugging
+  window._mlMap = map;
+
   map.on('load', async () => {
     console.log('Map loaded successfully');
 
     const apiBase = resolveApiBase();
 
-    // fetch nodes once and pass into control
     let geojson = null;
     try {
       const res = await fetch(apiBase + '/v2/node', { cache: 'no-store' });
-      if (res.ok) geojson = await res.json();
+      if (res.ok) {
+        geojson = await res.json();
+      } else {
+        console.warn('Failed to fetch /v2/node:', res.status, res.statusText);
+      }
     } catch (err) {
       console.warn('Could not fetch /v2/node at startup:', err);
     }
 
-    // Call the bundled control directly (it was imported above)
+    // If nodes loaded, add your new base node styling
+    if (geojson && geojson.type === 'FeatureCollection') {
+      // Base nodes source
+      if (!map.getSource('nodes')) {
+        map.addSource('nodes', {
+          type: 'geojson',
+          data: geojson
+        });
+      } else {
+        map.getSource('nodes').setData(geojson);
+      }
+
+      // New: decluttered node symbols: tiny dot + text, no sprites
+      if (!map.getLayer('nodes-symbol')) {
+        map.addLayer({
+          id: 'nodes-symbol',
+          type: 'symbol',
+          source: 'nodes',
+          layout: {
+            // this string is used only for placement; style via paint
+            'text-field': '•',
+            'text-font': ['Noto Sans Regular'],
+            'text-size': 10,
+
+            // automatic decluttering:
+            'text-allow-overlap': false,
+            'text-ignore-placement': false,
+            'text-padding': 2,
+
+            'text-offset': [0, 0],
+            'text-anchor': 'center',
+            'visibility': 'visible'
+          },
+          paint: {
+            // dot color
+            'text-color': '#ff8800',
+            'text-halo-color': '#000000',
+            'text-halo-width': 1,
+
+            // simple zoom-based visibility
+            'text-opacity': [
+              'step',
+              ['zoom'],
+              0,    // z < 6: hide
+              6, 0.7,
+              10, 1.0
+            ]
+          }
+        });
+      }
+
+      // New: separate label layer for names, decluttered, above dots
+      if (!map.getLayer('nodes-label')) {
+        map.addLayer({
+          id: 'nodes-label',
+          type: 'symbol',
+          source: 'nodes',
+          layout: {
+            'text-field': ['coalesce', ['get', 'name'], ['get', 'id']],
+            'text-size': ['interpolate', ['linear'], ['zoom'], 6, 10, 12, 14],
+            'text-offset': [0, 1.0],
+            'text-anchor': 'top',
+            'text-allow-overlap': false,
+            'text-padding': 2
+          },
+          paint: {
+            'text-color': '#222',
+            'text-halo-color': '#fff',
+            'text-halo-width': 1,
+            'text-opacity': [
+              'step',
+              ['zoom'],
+              0,   // z < 8: hide labels
+              8, 0.7,
+              12, 1.0
+            ]
+          }
+        });
+      }
+    }
+
+    // Call the (old) bundled control: it uses opts.data for search,
+    // but no longer restyles all nodes.
     try {
       await initSearchControl(map, { data: geojson, apiBase });
     } catch (err) {
@@ -67,7 +158,6 @@ function initMap() {
     }
   });
 
-  // Improved error logging: log the underlying error message when available
   map.on('error', (e) => {
     try {
       if (e && e.error) {
@@ -76,7 +166,6 @@ function initMap() {
         console.error('Map error:', e);
       }
     } catch (err) {
-      // last-resort
       console.error('Map error (logging failure):', e, err);
     }
   });
