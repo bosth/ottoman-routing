@@ -24,9 +24,9 @@
       "url": "https://tiles.locationiq.com/v3/pbf/tiles.json?key=pk.put_your_api_key_here7bb23dffeb4"
     }
   },
-  "sprite": "https://maputnik.github.io/osm-liberty/sprites/osm-liberty",
-  "glyphs": "https://orangemug.github.io/font-glyphs/glyphs/{fontstack}/{range}.pbf",
-  "layers": [
+  "sprite": "https://raw.githubusercontent.com/maputnik/osm-liberty/refs/heads/gh-pages/sprites/osm-liberty",
+  "glyphs": "https://static.urban-its.ru/fonts/{fontstack}/{range}.pbf",
+    "layers": [
     {
       "id": "background",
       "type": "background",
