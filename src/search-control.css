@@ -235,20 +235,6 @@
   white-space: nowrap;
 }
 
-.ml-node-mode {
-  font-size: 11px;
-  color: #555;
-  white-space: nowrap;
-}
-
-.ml-node-cost {
-  font-size: 11px;
-  font-weight: 600;
-  color: #222;
-  flex: 0 0 auto;
-  white-space: nowrap;
-}
-
 /* Segment row */
 .ml-flow-row-seg {
   padding: 2px 0;
@@ -316,6 +302,7 @@
 }
 
 /* Segment content row */
+/* Segment content row */
 .ml-seg-line {
   width: 100%;
   display: flex;
@@ -336,13 +323,39 @@
   min-width: 0;
 }
 
-/* Line name in italics */
+/* New: stack line name and mode; keep icon centered */
+.ml-seg-line-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
 .ml-seg-line-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-style: italic;
 }
+
+/* New: mode on its own row under the name */
+.ml-seg-line-mode {
+  font-size: 11px;
+  color: #555;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Bigger mode icons (~1.5x) */
+.material-symbols-outlined.ml-icon-inline {
+  font-variation-settings: 'FILL' 0, 'wght' 100, 'GRAD' 0, 'opsz' 32;
+  font-size: 32px;
+  vertical-align: middle;
+  margin-right: 6px;
+  /* Ensure the icon is vertically centered next to two text rows */
+  align-self: center;
+}
+
 
 /* Humanized per-segment cost */
 .ml-seg-line-cost {
@@ -363,13 +376,6 @@
   box-shadow: 0 0 0 3px rgba(0,0,0,0.10);
 }
 
-/* Bigger mode icons (~1.5x) */
-.material-symbols-outlined.ml-icon-inline {
-  font-variation-settings: 'FILL' 0, 'wght' 100, 'GRAD' 0, 'opsz' 32;
-  font-size: 24px;  /* 1.5x original 16px */
-  vertical-align: middle;
-  margin-right: 6px;
-}
 
 /* responsiveness */
 @media (max-width: 520px) {

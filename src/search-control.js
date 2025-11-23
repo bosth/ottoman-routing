@@ -19,7 +19,13 @@ function ensureHumanize() {
 }
 
 function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  return String(s ?? '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[c]));
 }
 
 function resolveApiBase(opts) {
@@ -81,7 +87,9 @@ export default async function initSearchControl(map, opts = {}) {
 
   async function getDataOrFetchLocal() {
     if (opts && opts.data && opts.data.features && Array.isArray(opts.data.features)) return opts.data;
-    const endpointPath = (opts && opts.endpoint) ? (opts.endpoint.startsWith('/') ? opts.endpoint : '/' + opts.endpoint) : '/v2/node';
+    const endpointPath = (opts && opts.endpoint)
+    ? (opts.endpoint.startsWith('/') ? opts.endpoint : '/' + opts.endpoint)
+    : '/v2/node';
     const endpoint = apiBase + endpointPath;
     const res = await fetch(endpoint, { cache: 'no-store' });
     if (!res.ok) throw new Error('Fetch failed: ' + res.status);
@@ -150,6 +158,7 @@ export default async function initSearchControl(map, opts = {}) {
     threshold: 0.45,
     distance: 100,
     minMatchCharLength: 1,
+    ignoreDiacritics: true,
     includeScore: true
   });
 
@@ -306,8 +315,26 @@ export default async function initSearchControl(map, opts = {}) {
     else inp.value = '';
 
     const feats = [];
-    if (selected.source) feats.push({ type: 'Feature', geometry: selected.source.geometry, properties: { role: 'source', id: selected.source.properties.id, name: selected.source.properties.name, shortLabel: selected.source.properties.shortLabel } });
-    if (selected.target) feats.push({ type: 'Feature', geometry: selected.target.geometry, properties: { role: 'target', id: selected.target.properties.id, name: selected.target.properties.name, shortLabel: selected.target.properties.shortLabel } });
+    if (selected.source) feats.push({
+      type: 'Feature',
+      geometry: selected.source.geometry,
+      properties: {
+        role: 'source',
+        id: selected.source.properties.id,
+        name: selected.source.properties.name,
+        shortLabel: selected.source.properties.shortLabel
+      }
+    });
+    if (selected.target) feats.push({
+      type: 'Feature',
+      geometry: selected.target.geometry,
+      properties: {
+        role: 'target',
+        id: selected.target.properties.id,
+        name: selected.target.properties.name,
+        shortLabel: selected.target.properties.shortLabel
+      }
+    });
     const fc = { type: 'FeatureCollection', features: feats };
     try {
       map.getSource('search-selected').setData(fc);
@@ -326,33 +353,13 @@ export default async function initSearchControl(map, opts = {}) {
       return `${m} min`;
     }
     const ms = (Number(mins) || 0) * 60000;
-    return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'] });
+    return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'], largest: 2 });
   }
 
-  // Row-based sidebar layout: each row is either a node or a segment
-  // Row-based sidebar layout: each row is either a node or a segment.
-  // "switch" segments (line name 'switch') are folded into the *target* node row:
-  //  - no separate segment row
-  //  - target node row shows "(switch)" and the segment's humanized cost.
-  // Row-based sidebar layout: each row is either a node or a segment.
-  // Special case: segments with line name "switch" are folded into the *target* node row.
-  // Row-based sidebar layout: each row is either a node or a segment.
-  // Special case: segments with line name "switch" are folded into the *first occurrence*
-  // of that node, and never rendered as separate segment rows.
-  // Row-based sidebar layout: each row is either a node or a segment.
-  // Special case: segments whose line name is "switch" (case-insensitive)
-  // are folded into the *first occurrence* of their target node:
-  //  - they never render as their own segment rows
-  //  - the target node row shows "(switch)" and the humanized cost.
   // Row-based sidebar layout: each row is either a node or a segment.
   // Special case:
   //   A "switch" segment (line name 'switch', case-insensitive) that is a self-loop
-  //   (source === target) will be merged into the *following* node row:
-  //     Node X
-  //     (switch X→X, cost)
-  //     Node X
-  //   becomes:
-  //     Node X  (switch)  cost
+  //   (source === target) will be merged into the *following* node row.
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
@@ -403,14 +410,13 @@ export default async function initSearchControl(map, opts = {}) {
     </div>`;
 
     // 1. Build a step timeline:
-    //    Node 0, Segment 0, Node 1, Segment 1, Node 2, ..., Segment N-1, Node N
     const steps = [];
     const isSwitchSeg = seg =>
     String(seg.line || '').toLowerCase() === 'switch' &&
     String(seg.source || '') === String(seg.target || '');
 
     // Start with first node
-    steps.push({ kind: 'node', label: nodes[0], foldedSwitch: null });
+    steps.push({ kind: 'node', label: nodes[0] });
 
     for (let i = 0; i < segs.length; i++) {
       const seg = segs[i];
@@ -431,19 +437,16 @@ export default async function initSearchControl(map, opts = {}) {
 
       steps.push({
         kind: 'node',
-        label: nodes[i + 1],
-        foldedSwitch: null
+        label: nodes[i + 1]
       });
     }
 
-    // 2. Walk the step timeline and build final rows while
-    //    merging "node, switch self-loop, same-node" triplets into one node row.
+    // 2. Walk steps and merge self-loop switch into node rows (data only; not displayed)
     const rows = [];
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
 
       if (step.kind === 'node') {
-        // Look ahead for the pattern: node, switch segment self-loop, node with same label
         const next = steps[i + 1];
         const afterNext = steps[i + 2];
 
@@ -455,20 +458,16 @@ export default async function initSearchControl(map, opts = {}) {
           afterNext.kind === 'node' &&
           String(afterNext.label) === String(step.label)
         ) {
-          // Merge into a single folded node row
           rows.push({
             type: 'node',
             label: step.label,
-            switchLine: next.line,            // "switch"
-              switchCostHuman: next.costHuman   // humanized cost
+            switchLine: next.line,
+              switchCostHuman: next.costHuman
           });
-
-          // Skip over the next two steps (switch segment + duplicate node)
           i += 2;
           continue;
         }
 
-        // Normal node row, no folded switch
         rows.push({
           type: 'node',
           label: step.label,
@@ -476,7 +475,6 @@ export default async function initSearchControl(map, opts = {}) {
             switchCostHuman: null
         });
       } else if (step.kind === 'segment') {
-        // Only render non-switch segments as segment rows
         if (!step.isSwitch) {
           rows.push({
             type: 'segment',
@@ -490,14 +488,10 @@ export default async function initSearchControl(map, opts = {}) {
       }
     }
 
-    // 3. Render to HTML
+    // 3. Render to HTML: node rows without (switch) text/cost; segment rows with two text lines
     const flowRowsHtml = rows.map(row => {
       if (row.type === 'node') {
         const label = escapeHtml(String(row.label || ''));
-        const hasSwitch = !!row.switchLine && !!row.switchCostHuman;
-        const modeLabel = hasSwitch ? escapeHtml(String(row.switchLine)) : '';
-        const costLabel = hasSwitch ? escapeHtml(String(row.switchCostHuman)) : '';
-
         return `
         <div class="ml-flow-row ml-flow-row-node">
         <div class="ml-flow-left">
@@ -506,13 +500,13 @@ export default async function initSearchControl(map, opts = {}) {
         <div class="ml-flow-right ml-flow-right-node">
         <div class="ml-node-main">
         <span class="ml-node-label">${label}</span>
-        ${hasSwitch ? `<span class="ml-node-mode">(${modeLabel})</span>` : ''}
         </div>
-        ${hasSwitch ? `<div class="ml-node-cost">${costLabel}</div>` : ''}
         </div>
         </div>`;
       }
 
+      // Segment row
+      // Segment row
       const segColor = String(row.color || '#000000');
       const modeKey = String(row.mode || '').toLowerCase();
       const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
@@ -524,6 +518,11 @@ export default async function initSearchControl(map, opts = {}) {
       else if (modeKey === 'narrow-gauge railway') connectorModeClass = 'railway-narrow';
       else if (modeKey === 'ferry' || modeKey === 'ship') connectorModeClass = modeKey;
       else if (modeKey === 'connection' || modeKey === 'transfer') connectorModeClass = modeKey;
+
+      // ALWAYS have a second line; for 'transfer' make the text empty
+      const modeLabel = (modeKey === 'transfer')
+      ? ''
+      : escapeHtml(modeKey || '');
 
       return `
       <div class="ml-flow-row ml-flow-row-seg">
@@ -541,7 +540,10 @@ export default async function initSearchControl(map, opts = {}) {
       style="color:${escapeHtml(segColor)}">
       ${escapeHtml(symbolName)}
       </span>
+      <div class="ml-seg-line-text">
       <span class="ml-seg-line-name">${escapeHtml(String(row.line))}</span>
+      <span class="ml-seg-line-mode">${modeLabel}</span>
+      </div>
       </div>
       <span class="ml-seg-line-cost">${escapeHtml(String(row.costHuman))}</span>
       </div>
@@ -705,7 +707,7 @@ export default async function initSearchControl(map, opts = {}) {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('Route fetch failed: ' + res.status);
       const routeGeo = await res.json();
-          window.__lastRouteGeo = routeGeo;
+      window.__lastRouteGeo = routeGeo;
       if (!routeGeo || !Array.isArray(routeGeo.features)) throw new Error('Invalid route GeoJSON');
 
       const palette = ['#1a73e8', '#d32f2f', '#2e7d32', '#fbc02d', '#6a1b9a', '#fb8c00', '#1e88e5', '#ec407a'];
@@ -775,19 +777,43 @@ export default async function initSearchControl(map, opts = {}) {
         if (f.geometry.type === 'LineString') {
           const coords = f.geometry.coordinates;
           if (Array.isArray(coords) && coords.length > 0) {
-            endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: coords[0] }, properties: { role: 'start', seg_idx: idx } });
-            endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: coords[coords.length - 1] }, properties: { role: 'end', seg_idx: idx } });
+            endPoints.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: coords[0] },
+              properties: { role: 'start', seg_idx: idx }
+            });
+            endPoints.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: coords[coords.length - 1] },
+              properties: { role: 'end', seg_idx: idx }
+            });
           }
         } else if (f.geometry.type === 'MultiLineString') {
           const allCoords = f.geometry.coordinates.flat();
           if (Array.isArray(allCoords) && allCoords.length > 0) {
-            endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: allCoords[0] }, properties: { role: 'start', seg_idx: idx } });
-            endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: allCoords[allCoords.length - 1] }, properties: { role: 'end', seg_idx: idx } });
+            endPoints.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: allCoords[0] },
+              properties: { role: 'start', seg_idx: idx }
+            });
+            endPoints.push({
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: allCoords[allCoords.length - 1] },
+              properties: { role: 'end', seg_idx: idx }
+            });
           }
         } else if (f.geometry.type === 'Point') {
           const c = f.geometry.coordinates;
-          endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: { role: 'start', seg_idx: idx } });
-          endPoints.push({ type: 'Feature', geometry: { type: 'Point', coordinates: c }, properties: { role: 'end', seg_idx: idx } });
+          endPoints.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: c },
+            properties: { role: 'start', seg_idx: idx }
+          });
+          endPoints.push({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: c },
+            properties: { role: 'end', seg_idx: idx }
+          });
         }
       });
 
@@ -963,11 +989,14 @@ export default async function initSearchControl(map, opts = {}) {
     st.activeIndex = -1;
     st.suggestionsEl.removeAttribute('aria-activedescendant');
     st.suggestionsEl.setAttribute('aria-expanded', 'false');
-    if (role === 'source') {
+
+    // New behavior: if both selected, fetch route; otherwise focus the other empty box
+    if (role === 'source' && !selected.target) {
       setTimeout(() => { state.target.input.focus(); }, 0);
-    } else {
-      setTimeout(() => { state.target.input.focus(); }, 0);
+    } else if (role === 'target' && !selected.source) {
+      setTimeout(() => { state.source.input.focus(); }, 0);
     }
+
     fetchAndRenderRouteIfReady().catch(console.error);
   }
 
@@ -1065,7 +1094,15 @@ export default async function initSearchControl(map, opts = {}) {
     const f = features[0];
     const nodeId = (f.properties && (f.properties.id ?? f.properties.ID ?? f.id)) || '';
     const found = allFeatures.find(x => String(x.properties.id) === String(nodeId));
-    const feat = found || { type: 'Feature', geometry: f.geometry, properties: { id: nodeId, name: (f.properties && f.properties.name) || '', rank: f.properties && f.properties.rank } };
+    const feat = found || {
+      type: 'Feature',
+      geometry: f.geometry,
+      properties: {
+        id: nodeId,
+        name: (f.properties && f.properties.name) || '',
+         rank: f.properties && f.properties.rank
+      }
+    };
     setSelectedFeature(activeRole, feat);
     state[activeRole].suggestionsEl.innerHTML = '';
     state[activeRole].lastResults = [];
