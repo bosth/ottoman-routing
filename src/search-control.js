@@ -908,6 +908,7 @@ export default async function initSearchControl(map, opts = {}) {
       }
 
       try { if (map.getLayer('search-route-line-base')) map.removeLayer('search-route-line-base'); } catch (_) {}
+      try { if (map.getLayer('search-route-road-outline')) map.removeLayer('search-route-road-outline'); } catch (_) {}
       try { if (map.getLayer('search-route-rail-symbol')) map.removeLayer('search-route-rail-symbol'); } catch (_) {}
       try { if (map.getLayer('search-route-rail-narrow-symbol')) map.removeLayer('search-route-rail-narrow-symbol'); } catch (_) {}
       try { if (map.getLayer('search-route-line-fallback')) map.removeLayer('search-route-line-fallback'); } catch (_) {}
@@ -915,6 +916,21 @@ export default async function initSearchControl(map, opts = {}) {
 
       let addedComplexLayers = false;
       try {
+        // 1) Dark casing for road/chaussee (slightly wider)
+        map.addLayer({
+          id: 'search-route-road-outline',
+          type: 'line',
+          source: 'search-route',
+          filter: ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]],
+          layout: { 'line-join': 'round', 'line-cap': 'round' },
+          paint: {
+            'line-color': '#000000',
+            'line-width': 6,          // casing width
+            'line-opacity': 0.9
+          }
+        }, 'nodes-label');             // still keep it below node labels
+
+        // 2) Main colored line layer on top (including white roads)
         map.addLayer({
           id: 'search-route-line-base',
           type: 'line',
@@ -942,7 +958,8 @@ export default async function initSearchControl(map, opts = {}) {
               'case',
               ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5,
               ['==', ['get', 'ml_mode_lower'], 'railway'], 6,
-              ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 6,
+              // slightly thinner than outline so border shows
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 4,
               ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2,
               ['has', 'ml_color'], 4,
               4
@@ -955,7 +972,7 @@ export default async function initSearchControl(map, opts = {}) {
             ],
             'line-opacity': 0.95
           }
-        });
+        }, 'nodes-label');
 
         if (map.hasImage && map.hasImage('ml-rail-pattern')) {
           map.addLayer({
