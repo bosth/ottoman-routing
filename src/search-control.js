@@ -606,38 +606,26 @@ export default async function initSearchControl(map, opts = {}) {
     let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
     gj.features.forEach(f => {
       if (!f.geometry) return;
-      if (f.geometry.type === 'Point') {
-        const coords = [f.geometry.coordinates];
-        coords.forEach(([lng, lat]) => {
-          if (lng < minLng) minLng = lng;
-          if (lng > maxLng) maxLng = lng;
-          if (lat < minLat) minLat = lat;
-          if (lat > maxLat) maxLat = lat;
-        });
-      } else if (f.geometry.type === 'MultiPoint' || f.geometry.type === 'LineString') {
-        const coords = f.geometry.coordinates;
-        coords.forEach(([lng, lat]) => {
-          if (lng < minLng) minLng = lng;
-          if (lng > maxLng) maxLng = lng;
-          if (lat < minLat) minLat = lat;
-          if (lat > maxLat) maxLat = lat;
-        });
-      } else if (f.geometry.type === 'MultiLineString') {
-        f.geometry.coordinates.forEach(line => line.forEach(([lng, lat]) => {
-          if (lng < minLng) minLng = lng;
-          if (lng > maxLng) maxLng = maxLng < lng ? lng : maxLng;
-          if (lat < minLat) minLat = lat;
-          if (lat > maxLat) maxLat = lat;
-        }));
-      } else if (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon') {
-        const polys = (f.geometry.type === 'Polygon') ? f.geometry.coordinates : f.geometry.coordinates.flat();
-        polys.forEach(ring => ring.forEach(([lng, lat]) => {
-          if (lng < minLng) minLng = lng;
-          if (lng > maxLng) maxLng = lng;
-          if (lat < minLat) minLat = lat;
-          if (lat > maxLat) maxLat = lat;
-        }));
-      }
+      const addPoint = ([lng, lat]) => {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      };
+
+        if (f.geometry.type === 'Point') {
+          addPoint(f.geometry.coordinates);
+        } else if (f.geometry.type === 'MultiPoint' || f.geometry.type === 'LineString') {
+          (f.geometry.coordinates || []).forEach(addPoint);
+        } else if (f.geometry.type === 'MultiLineString') {
+          (f.geometry.coordinates || []).forEach(line => (line || []).forEach(addPoint));
+        } else if (f.geometry.type === 'Polygon') {
+          (f.geometry.coordinates || []).forEach(ring => (ring || []).forEach(addPoint));
+        } else if (f.geometry.type === 'MultiPolygon') {
+          (f.geometry.coordinates || []).forEach(poly =>
+          (poly || []).forEach(ring => (ring || []).forEach(addPoint))
+          );
+        }
     });
 
     if (minLng === Infinity) return;
@@ -671,13 +659,78 @@ export default async function initSearchControl(map, opts = {}) {
 
     const padding = opts.padding || computePaddingFromSidebar();
 
+    // --- Compute target center and zoom manually (Mapbox-style) ---
+
+    const centerLng = (minLng + maxLng) / 2;
+    const centerLat = (minLat + maxLat) / 2;
+
     try {
-      map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding, duration: 700 });
+      const mapCanvas = map.getCanvas ? map.getCanvas() : map.getContainer();
+      const width = mapCanvas.clientWidth;
+      const height = mapCanvas.clientHeight;
+      if (!width || !height) throw new Error('Map size unavailable');
+
+      // Effective width/height after padding
+      const padLeft = padding.left || 0;
+      const padRight = padding.right || 0;
+      const padTop = padding.top || 0;
+      const padBottom = padding.bottom || 0;
+
+      const innerWidth = width - padLeft - padRight;
+      const innerHeight = height - padTop - padBottom;
+      if (innerWidth <= 0 || innerHeight <= 0) throw new Error('Inner size <= 0');
+
+      // Web Mercator projection helpers (same math used internally)
+      const R = 6378137;
+      const MAX_LAT = 85.0511287798;
+
+      function lngLatToWorld([lng, lat]) {
+        const x = (lng + 180) / 360;
+        const sin = Math.sin((Math.max(Math.min(MAX_LAT, lat), -MAX_LAT) * Math.PI) / 180);
+        const y = 0.5 - (Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI));
+        return [x, y]; // [0..1] in both axes at zoom 0, scaled later
+      }
+
+      const [minWX, minWY] = lngLatToWorld([minLng, minLat]);
+      const [maxWX, maxWY] = lngLatToWorld([maxLng, maxLat]);
+
+      const worldWidth = Math.abs(maxWX - minWX);
+      const worldHeight = Math.abs(maxWY - minWY);
+
+      if (worldWidth === 0 || worldHeight === 0) {
+        // single point or degenerate; just ease to center with a fallback zoom
+        map.easeTo({
+          center: [centerLng, centerLat],
+          zoom: (map.getZoom() || 10) - 1,
+                   duration: 700
+        });
+        return;
+      }
+
+      // Zoom where worldWidth * 2^zoom ~= innerWidth (same for height)
+      const zoomX = Math.log2(innerWidth / (worldWidth * 512));
+      const zoomY = Math.log2(innerHeight / (worldHeight * 512));
+      const targetZoomNatural = Math.min(zoomX, zoomY);
+
+      // One level less than the "natural" fitBounds zoom
+      const targetZoom = targetZoomNatural - 1;
+
+      map.easeTo({
+        center: [centerLng, centerLat],
+        zoom: targetZoom,
+        padding,            // still apply padding so it favors left side vs sidebar
+        duration: 700
+      });
     } catch (e) {
+      // Fallback: center only, small zoom-out from current
       try {
         const centerLng = (minLng + maxLng) / 2;
         const centerLat = (minLat + maxLat) / 2;
-        map.easeTo({ center: [centerLng, centerLat], duration: 700 });
+        map.easeTo({
+          center: [centerLng, centerLat],
+          zoom: (map.getZoom() || 10) - 1,
+                   duration: 700
+        });
       } catch (e2) {}
     }
   }
