@@ -10,7 +10,7 @@
   overflow: hidden;
   background: white;
   padding: 8px;
-  width: 420px;
+  width: 340px; /* narrower sidebar than the original 420px */
   box-sizing: border-box;
 }
 
@@ -181,6 +181,7 @@
 :root {
   --ml-node-size: 12px;
   --ml-flow-left-width: 32px;
+  --ml-search-toggle-top: 50%; /* used for collapsed toggle vertical position */
 }
 
 /* Container for all rows */
@@ -306,14 +307,6 @@
   background-repeat: repeat-y;
 }
 
-/* Node label */
-.ml-node-label {
-  font-size: 13px;
-  line-height: 1.2;
-  word-break: break-word;
-}
-
-/* Segment content row */
 /* Segment content row */
 .ml-seg-line {
   width: 100%;
@@ -364,10 +357,8 @@
   font-size: 32px;
   vertical-align: middle;
   margin-right: 6px;
-  /* Ensure the icon is vertically centered next to two text rows */
   align-self: center;
 }
-
 
 /* Humanized per-segment cost */
 .ml-seg-line-cost {
@@ -388,6 +379,63 @@
   box-shadow: 0 0 0 3px rgba(0,0,0,0.10);
 }
 
+/* ========== COLLAPSE TOGGLE BUTTON ========== */
+
+/* Expanded:
+ * - .ml-search-toggle is absolutely positioned relative to the map container
+ *   (top/left set in JS using real layout measurements).
+ * - It appears between the two search boxes and attached to the sidebar’s right edge.
+ */
+.ml-search-toggle {
+  position: absolute;
+  width: 24px;
+  height: 44px;
+  border-radius: 0 8px 8px 0;
+  border: 1px solid #ccc;
+  border-left: none;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.20);
+  z-index: 1100;  /* above sidebar */
+  padding: 0;
+}
+
+.ml-search-toggle:hover {
+  background: #f5f5f5;
+}
+
+/* Collapsed sidebar: hide content, remove box look */
+.map-search-container.ml-search-collapsed {
+  width: 0;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
+/* Hide everything except the toggle when collapsed */
+.map-search-container.ml-search-collapsed .search-rows,
+.map-search-container.ml-search-collapsed .ml-sidebar,
+.map-search-container.ml-search-collapsed .suggestions,
+.map-search-container.ml-search-collapsed .controls {
+  display: none !important;
+}
+
+/* Collapsed toggle: fixed on left edge at stored vertical position */
+.ml-search-toggle.ml-search-toggle-fixed {
+  position: fixed;
+  left: 0;
+  right: auto;
+  top: var(--ml-search-toggle-top, 50%);
+  transform: translateY(-50%);
+  border-radius: 0 8px 8px 0;
+  border-left: none;
+  border-right: 1px solid #ccc;
+}
 
 /* responsiveness */
 @media (max-width: 520px) {

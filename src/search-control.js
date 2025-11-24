@@ -2,6 +2,7 @@
 // Original search + routing UI/logic, modified to NOT restyle all nodes.
 // It uses the nodes provided by main.js for base styling and only adds
 // selection + route layers + UI.
+// Now also adds a collapsible sidebar with a correctly positioned toggle button.
 
 import Fuse from 'fuse.js';
 
@@ -27,7 +28,7 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;',
     '<': '&lt;',
-    '>': '&gt;',
+    '>': '&lt;',
     '"': '&quot;',
     "'": '&#39;'
   }[c]));
@@ -66,7 +67,8 @@ export default async function initSearchControl(map, opts = {}) {
   const maxSuggestions = opts.maxSuggestions || 8;
 
   // Create / reuse the fixed-position UI container
-  const existing = map.getContainer().querySelector('.map-search-container');
+  const mapContainer = map.getContainer();
+  const existing = mapContainer.querySelector('.map-search-container');
   let container = existing;
   if (!container) {
     container = document.createElement('div');
@@ -75,10 +77,10 @@ export default async function initSearchControl(map, opts = {}) {
     container.style.top = '12px';
     container.style.left = '12px';
     container.style.zIndex = 1000;
-    container.style.width = '420px';
+    container.style.width = '340px'; // narrower sidebar; CSS also sets width, this is a fallback
     container.setAttribute('aria-live', 'polite');
     container.innerHTML = createContainerHTML();
-    map.getContainer().appendChild(container);
+    mapContainer.appendChild(container);
   } else {
     container.innerHTML = createContainerHTML();
   }
@@ -90,6 +92,78 @@ export default async function initSearchControl(map, opts = {}) {
   const statusEl = container.querySelector('#mlStatus');
   const clearBtn = container.querySelector('#mlClearBtn');
   const sidebar = container.querySelector('#mlSidebar');
+
+  // ---- Collapse toggle button setup ----
+  // We append the toggle to the map container so it can live fully outside the sidebar.
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'ml-search-toggle';
+  toggleBtn.setAttribute('aria-label', 'Toggle search sidebar');
+  toggleBtn.textContent = '⟨'; // collapse arrow
+  mapContainer.appendChild(toggleBtn);
+
+  function positionToggleExpanded() {
+    // If collapsed, do not override fixed positioning
+    if (container.classList.contains('ml-search-collapsed')) return;
+
+    if (!sourceBox || !targetBox || !container.isConnected) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const startRect = sourceBox.getBoundingClientRect();
+    const destRect = targetBox.getBoundingClientRect();
+
+    if (startRect.height === 0 || destRect.height === 0) return;
+
+    // Vertical center between the top of the start input and the bottom of the target input
+    const midY = (startRect.top + destRect.bottom) / 2;
+
+    const sidebarRight = containerRect.right;
+
+    const toggleRect = toggleBtn.getBoundingClientRect();
+    const halfH = toggleRect.height / 2 || 22;
+
+    toggleBtn.style.top = `${midY - halfH}px`;
+    toggleBtn.style.left = `${sidebarRight}px`;
+  }
+
+  // Initial expanded position
+  requestAnimationFrame(positionToggleExpanded);
+
+  window.addEventListener('resize', () => {
+    if (!container.classList.contains('ml-search-collapsed')) {
+      positionToggleExpanded();
+    }
+  });
+
+  toggleBtn.addEventListener('click', () => {
+    const willCollapse = !container.classList.contains('ml-search-collapsed');
+
+    if (willCollapse) {
+      // Capture current vertical center in viewport coordinates
+      const rect = toggleBtn.getBoundingClientRect();
+      const centerY = rect.top + rect.height / 2;
+      const vh = window.innerHeight || document.documentElement.clientHeight;
+      const percent = (centerY / vh) * 100;
+      document.documentElement.style.setProperty('--ml-search-toggle-top', `${percent}vh`);
+
+      // Clear inline left/top so CSS fixed positioning fully controls it
+      toggleBtn.style.top = '';
+      toggleBtn.style.left = '';
+
+      container.classList.add('ml-search-collapsed');
+      toggleBtn.classList.add('ml-search-toggle-fixed');
+      toggleBtn.textContent = '⟩'; // expand arrow
+    } else {
+      container.classList.remove('ml-search-collapsed');
+      toggleBtn.classList.remove('ml-search-toggle-fixed');
+      toggleBtn.textContent = '⟨';
+
+      // Recompute expanded position from layout
+      requestAnimationFrame(positionToggleExpanded);
+    }
+  });
+
+  // ---- Existing search logic below (unchanged except for container width) ----
 
   async function getDataOrFetchLocal() {
     if (opts && opts.data && opts.data.features && Array.isArray(opts.data.features)) return opts.data;
@@ -551,7 +625,7 @@ export default async function initSearchControl(map, opts = {}) {
       } else if (f.geometry.type === 'MultiLineString') {
         f.geometry.coordinates.forEach(line => line.forEach(([lng, lat]) => {
           if (lng < minLng) minLng = lng;
-          if (lng > maxLng) maxLng = lng;
+          if (lng > maxLng) maxLng = maxLng < lng ? lng : maxLng;
           if (lat < minLat) minLat = lat;
           if (lat > maxLat) maxLat = lat;
         }));
