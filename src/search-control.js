@@ -254,6 +254,14 @@ export default async function initSearchControl(map, opts = {}) {
 
   let activeRole = null;
 
+  // Change cursor when in search state
+  function updateMapCursor() {
+    const mapCanvas = map.getCanvas();
+    if (mapCanvas) {
+      mapCanvas.style.cursor = activeRole ? 'crosshair' : '';
+    }
+  }
+
   const rankLabelMap = {
     2: 'stop',
     3: 'dock',
@@ -607,27 +615,6 @@ export default async function initSearchControl(map, opts = {}) {
       });
     });
   }
-
-  // Change cursor when in search state
-  function updateMapCursor() {
-    const mapCanvas = map.getCanvas();
-    if (mapCanvas) {
-      mapCanvas.style.cursor = activeRole ? 'crosshair' : '';
-    }
-  }
-
-  // Update cursor when focus changes
-  Object.keys(state).forEach(role => {
-    const st = state[role];
-
-    st.input.addEventListener('focus', () => {
-      activeRole = role;
-      st.input.classList.add('active');
-      const other = (role === 'source') ? state.target.input : state.source.input;
-      other.classList.remove('active');
-      updateMapCursor(); // Add this line
-    });
-  });
 
   function fitBoundsForGeoJSON(gj, opts = {}) {
     if (!gj || !Array.isArray(gj.features) || gj.features.length === 0) return;
@@ -1136,6 +1123,7 @@ export default async function initSearchControl(map, opts = {}) {
       st.input.classList.add('active');
       const other = (role === 'source') ? state.target.input : state.source.input;
       other.classList.remove('active');
+      updateMapCursor();
     });
 
     st.input.addEventListener('blur', () => {
@@ -1147,11 +1135,10 @@ export default async function initSearchControl(map, opts = {}) {
           activeRole = null;
           state.source.input.classList.remove('active');
           state.target.input.classList.remove('active');
-          updateMapCursor(); // Add this line
+          updateMapCursor();
         }
       }, 150);
     });
-
 
     st.input.addEventListener('click', () => {
       try { st.input.select(); } catch (e) {}
@@ -1218,65 +1205,90 @@ export default async function initSearchControl(map, opts = {}) {
   });
 
   // IMPORTANT: click selection now uses your 'nodes-symbol' layer
+  // IMPORTANT: click selection now uses your 'nodes-symbol' layer
   map.on('click', (ev) => {
     console.log('Map clicked, activeRole:', activeRole);
-    console.log('Document active element:', document.activeElement);
-    console.log('Source box:', document.getElementById('mlSourceBox'));
     if (!activeRole) {
       console.log('Returning early because activeRole is null');
       return;
     }
 
-    const clickTolerance = 20; // pixels
-    const bbox = [
-      [ev.point.x - clickTolerance, ev.point.y - clickTolerance],
-      [ev.point.x + clickTolerance, ev.point.y + clickTolerance]
-    ];
-    console.log('Querying bbox:', bbox);
+    // Convert click point to lng/lat
+    const clickLngLat = ev.lngLat;
 
-    const features = map.queryRenderedFeatures(bbox, { layers: ['nodes-symbol'] });
-    console.log('Features found:', features.length, features);
+    // Find nearest feature within tolerance by distance calculation
+    const clickTolerance = 0.004; // degrees (0.001 is roughly 100m at equator)
 
-    if (!features || !features.length) return;
-    const f = features[0];
-    const nodeId = (f.properties && (f.properties.id ?? f.properties.ID ?? f.id)) || '';
-    const found = allFeatures.find(x => String(x.properties.id) === String(nodeId));
-    const feat = found || {
-      type: 'Feature',
-      geometry: f.geometry,
-      properties: {
-        id: nodeId,
-        name: (f.properties && f.properties.name) || '',
-         rank: f.properties && f.properties.rank
-      }
-    };
-    setSelectedFeature(activeRole, feat);
-    const currentRole = activeRole; // Save it before potentially clearing
-    state[currentRole].suggestionsEl.innerHTML = '';
-    state[currentRole].lastResults = [];
-    state[currentRole].activeIndex = -1;
+  let nearestFeature = null;
+  let nearestDistance = Infinity;
 
-    if (activeRole === 'source' && !selected.target) {
-      setTimeout(() => {
-        state.target.input.focus();
-        updateMapCursor();
-      }, 0);
-    } else if (activeRole === 'target' && !selected.source) {
-      setTimeout(() => {
-        state.source.input.focus();
-        updateMapCursor();
-      }, 0);
-    } else {
-      // If both are selected, clear activeRole and reset cursor
-      activeRole = null;
-      state.source.input.classList.remove('active');
-      state.target.input.classList.remove('active');
-      updateMapCursor();
+  allFeatures.forEach(feat => {
+    if (!feat.geometry || feat.geometry.type !== 'Point') return;
+
+    const [lng, lat] = feat.geometry.coordinates;
+    const dx = lng - clickLngLat.lng;
+    const dy = lat - clickLngLat.lat;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    if (dist < clickTolerance && dist < nearestDistance) {
+      nearestDistance = dist;
+      nearestFeature = feat;
     }
+  });
 
-    state[currentRole].suggestionsEl.removeAttribute('aria-activedescendant');
-    state[currentRole].suggestionsEl.setAttribute('aria-expanded', 'false');
-    fetchAndRenderRouteIfReady().catch(console.error);
+  if (!nearestFeature) {
+    console.log('No feature found near click');
+    // Keep the search box focused and activeRole set so user can try again
+    const currentInput = state[activeRole].input;
+    setTimeout(() => {
+      currentInput.focus();
+      updateMapCursor();
+    }, 0);
+    return;
+  }
+
+  const nodeId = nearestFeature.properties.id;
+
+  // Don't allow selecting the same node twice
+  const otherRole = activeRole === 'source' ? 'target' : 'source';
+  if (selected[otherRole] && String(selected[otherRole].properties.id) === String(nodeId)) {
+    console.log('Cannot select the same node for both source and target');
+    // Keep the search box focused and activeRole set so user can try again
+    const currentInput = state[activeRole].input;
+    setTimeout(() => {
+      currentInput.focus();
+      updateMapCursor();
+    }, 0);
+    return;
+  }
+
+  setSelectedFeature(activeRole, nearestFeature);
+  const currentRole = activeRole;
+  state[currentRole].suggestionsEl.innerHTML = '';
+  state[currentRole].lastResults = [];
+  state[currentRole].activeIndex = -1;
+
+  if (activeRole === 'source' && !selected.target) {
+    setTimeout(() => {
+      state.target.input.focus();
+      updateMapCursor();
+    }, 0);
+  } else if (activeRole === 'target' && !selected.source) {
+    setTimeout(() => {
+      state.source.input.focus();
+      updateMapCursor();
+    }, 0);
+  } else {
+    // If both are selected, clear activeRole and reset cursor
+    activeRole = null;
+    state.source.input.classList.remove('active');
+    state.target.input.classList.remove('active');
+    updateMapCursor();
+  }
+
+  state[currentRole].suggestionsEl.removeAttribute('aria-activedescendant');
+  state[currentRole].suggestionsEl.setAttribute('aria-expanded', 'false');
+  fetchAndRenderRouteIfReady().catch(console.error);
   });
 
   clearBtn.addEventListener('click', () => {
@@ -1299,6 +1311,7 @@ export default async function initSearchControl(map, opts = {}) {
       try { sourceBox.select(); } catch (e) {}
       activeRole = 'source';
       sourceBox.classList.add('active');
+      updateMapCursor();
     }, 0);
   } catch (e) {}
 
