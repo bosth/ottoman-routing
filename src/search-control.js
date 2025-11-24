@@ -209,13 +209,21 @@ export default async function initSearchControl(map, opts = {}) {
       type: 'circle',
       source: 'search-selected',
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['get', 'rank'], 1, 10, 50, 6],
+        // Slightly larger, fixed radius for explicit start/target,
+        // otherwise fall back to rank-based size.
+        'circle-radius': [
+          'case',
+          ['==', ['get', 'role'], 'source'], 8,
+          ['==', ['get', 'role'], 'target'], 8,
+          ['interpolate', ['linear'], ['get', 'rank'], 1, 10, 50, 6]
+        ],
+        // Start (source) = green, Target = red, others = gray.
         'circle-color': [
           'match',
           ['get', 'role'],
-          'source', '#1976d2',
-          'target', '#d32f2f',
-          '#888'
+          'source', '#2e7d32',   // green for start node
+          'target', '#d32f2f',   // red for target node
+          '#888888'
         ],
         'circle-stroke-color': '#fff',
         'circle-stroke-width': 2

@@ -136,7 +136,7 @@ function initMap() {
           paint: {
             'text-color': '#222',
             'text-halo-color': '#fff',
-            'text-halo-width': 1,
+            'text-halo-width': 3,
             'text-opacity': [
               'step',
               ['zoom'],
