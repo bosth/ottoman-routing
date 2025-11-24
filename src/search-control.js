@@ -263,9 +263,14 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   const rankLabelMap = {
-    2: 'stop',
+    9: 'vilâyet merkezi',
+    8: 'sancak merkezi',
+    7: 'kazâ merkezi',
+    6: 'nâhiye merkezi',
+    5: 'köy',
+    4: 'station',
     3: 'dock',
-    4: 'train station'
+    2: 'stop'
   };
 
   const modeSymbolMap = {
@@ -472,6 +477,10 @@ export default async function initSearchControl(map, opts = {}) {
       const seg = segs[i];
       const costHuman = humanizedCosts[i];
       const switchy = isSwitchSeg(seg);
+      const feat = routeGeo.features[seg.idx];
+      const rank = (feat && feat.properties && feat.properties.rank !== undefined)
+      ? Number(feat.properties.rank)
+      : null;
 
       steps.push({
         kind: 'segment',
@@ -482,7 +491,8 @@ export default async function initSearchControl(map, opts = {}) {
         costHuman,
         isSwitch: switchy,
         source: seg.source,
-        target: seg.target
+        target: seg.target,
+        rank: rank  // Add rank to segment steps
       });
 
       steps.push({
@@ -490,6 +500,8 @@ export default async function initSearchControl(map, opts = {}) {
         label: nodes[i + 1]
       });
     }
+
+    // Replace the rows building section in updateSidebarForRoute:
 
     const rows = [];
     for (let i = 0; i < steps.length; i++) {
@@ -507,11 +519,13 @@ export default async function initSearchControl(map, opts = {}) {
           afterNext.kind === 'node' &&
           String(afterNext.label) === String(step.label)
         ) {
+          // This node has a switch - use the switch segment's rank
           rows.push({
             type: 'node',
             label: step.label,
             switchLine: next.line,
-              switchCostHuman: next.costHuman
+              switchCostHuman: next.costHuman,
+                rank: next.rank  // Add the rank from the switch segment
           });
           i += 2;
           continue;
@@ -521,7 +535,8 @@ export default async function initSearchControl(map, opts = {}) {
           type: 'node',
           label: step.label,
           switchLine: null,
-            switchCostHuman: null
+            switchCostHuman: null,
+              rank: null  // Will be determined from adjacent segment
         });
       } else if (step.kind === 'segment') {
         if (!step.isSwitch) {
@@ -531,15 +546,51 @@ export default async function initSearchControl(map, opts = {}) {
             line: step.line,
             mode: step.mode,
             color: step.color,
-            costHuman: step.costHuman
+            costHuman: step.costHuman,
+            rank: step.rank  // Pass through the rank
           });
         }
       }
     }
 
-    const flowRowsHtml = rows.map(row => {
+    const flowRowsHtml = rows.map((row, rowIdx) => {
       if (row.type === 'node') {
         const label = escapeHtml(String(row.label || ''));
+
+        // Determine rank for this node
+        let rankLabel = '';
+
+        // Check if this row already has a rank (from a switch)
+        if (row.rank !== null && row.rank !== undefined) {
+          const rank = Number(row.rank);
+          if (!isNaN(rank) && rankLabelMap.hasOwnProperty(rank)) {
+            rankLabel = `<span class="ml-node-rank"><em>${escapeHtml(rankLabelMap[rank])}</em></span>`;
+          }
+        } else if (rowIdx === rows.length - 1 && selected.target) {
+          // Last node - get rank from target search box
+          const rank = Number(selected.target.properties.rank);
+          if (!isNaN(rank) && rankLabelMap.hasOwnProperty(rank)) {
+            rankLabel = `<span class="ml-node-rank"><em>${escapeHtml(rankLabelMap[rank])}</em></span>`;
+          }
+        } else {
+          // All other nodes - get rank from the segment that starts at this node
+          // Count how many segments come AFTER this node position
+          const segmentsAfterThisNode = rows.slice(rowIdx + 1).filter(r => r.type === 'segment').length;
+          const totalSegments = rows.filter(r => r.type === 'segment').length;
+          const segIdxForThisNode = totalSegments - segmentsAfterThisNode;
+
+          if (segIdxForThisNode >= 0 && segIdxForThisNode < segs.length) {
+            const seg = segs[segIdxForThisNode];
+            const feat = routeGeo.features[seg.idx];
+            if (feat && feat.properties && feat.properties.rank !== undefined) {
+              const rank = Number(feat.properties.rank);
+              if (!isNaN(rank) && rankLabelMap.hasOwnProperty(rank)) {
+                rankLabel = `<span class="ml-node-rank"><em>${escapeHtml(rankLabelMap[rank])}</em></span>`;
+              }
+            }
+          }
+        }
+
         return `
         <div class="ml-flow-row ml-flow-row-node">
         <div class="ml-flow-left">
@@ -547,12 +598,14 @@ export default async function initSearchControl(map, opts = {}) {
         </div>
         <div class="ml-flow-right ml-flow-right-node">
         <div class="ml-node-main">
-        <span class="ml-node-label">${label}</span>
+        <span class="ml-node-label">${label}</span>${rankLabel}
         </div>
         </div>
         </div>`;
       }
 
+
+      // Segment rendering stays the same...
       const segColor = String(row.color || '#000000');
       const modeKey = String(row.mode || '').toLowerCase();
       const symbolName = modeSymbolMapLocal.hasOwnProperty(modeKey)
@@ -1217,7 +1270,7 @@ export default async function initSearchControl(map, opts = {}) {
     const clickLngLat = ev.lngLat;
 
     // Find nearest feature within tolerance by distance calculation
-    const clickTolerance = 0.004; // degrees (0.001 is roughly 100m at equator)
+    const clickTolerance = 0.006; // degrees (0.001 is roughly 100m at equator)
 
   let nearestFeature = null;
   let nearestDistance = Infinity;
