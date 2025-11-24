@@ -608,6 +608,27 @@ export default async function initSearchControl(map, opts = {}) {
     });
   }
 
+  // Change cursor when in search state
+  function updateMapCursor() {
+    const mapCanvas = map.getCanvas();
+    if (mapCanvas) {
+      mapCanvas.style.cursor = activeRole ? 'crosshair' : '';
+    }
+  }
+
+  // Update cursor when focus changes
+  Object.keys(state).forEach(role => {
+    const st = state[role];
+
+    st.input.addEventListener('focus', () => {
+      activeRole = role;
+      st.input.classList.add('active');
+      const other = (role === 'source') ? state.target.input : state.source.input;
+      other.classList.remove('active');
+      updateMapCursor(); // Add this line
+    });
+  });
+
   function fitBoundsForGeoJSON(gj, opts = {}) {
     if (!gj || !Array.isArray(gj.features) || gj.features.length === 0) return;
 
@@ -1119,13 +1140,18 @@ export default async function initSearchControl(map, opts = {}) {
 
     st.input.addEventListener('blur', () => {
       setTimeout(() => {
-        if (!container.contains(document.activeElement)) {
+        const activeEl = document.activeElement;
+        const isMapCanvas = activeEl && activeEl.classList && activeEl.classList.contains('maplibregl-canvas');
+
+        if (!container.contains(activeEl) && !isMapCanvas) {
           activeRole = null;
           state.source.input.classList.remove('active');
           state.target.input.classList.remove('active');
+          updateMapCursor(); // Add this line
         }
       }, 150);
     });
+
 
     st.input.addEventListener('click', () => {
       try { st.input.select(); } catch (e) {}
@@ -1193,8 +1219,24 @@ export default async function initSearchControl(map, opts = {}) {
 
   // IMPORTANT: click selection now uses your 'nodes-symbol' layer
   map.on('click', (ev) => {
-    if (!activeRole) return;
-    const features = map.queryRenderedFeatures(ev.point, { layers: ['nodes-symbol', 'search-selected-circle'] });
+    console.log('Map clicked, activeRole:', activeRole);
+    console.log('Document active element:', document.activeElement);
+    console.log('Source box:', document.getElementById('mlSourceBox'));
+    if (!activeRole) {
+      console.log('Returning early because activeRole is null');
+      return;
+    }
+
+    const clickTolerance = 20; // pixels
+    const bbox = [
+      [ev.point.x - clickTolerance, ev.point.y - clickTolerance],
+      [ev.point.x + clickTolerance, ev.point.y + clickTolerance]
+    ];
+    console.log('Querying bbox:', bbox);
+
+    const features = map.queryRenderedFeatures(bbox, { layers: ['nodes-symbol'] });
+    console.log('Features found:', features.length, features);
+
     if (!features || !features.length) return;
     const f = features[0];
     const nodeId = (f.properties && (f.properties.id ?? f.properties.ID ?? f.id)) || '';
@@ -1209,12 +1251,31 @@ export default async function initSearchControl(map, opts = {}) {
       }
     };
     setSelectedFeature(activeRole, feat);
-    state[activeRole].suggestionsEl.innerHTML = '';
-    state[activeRole].lastResults = [];
-    state[activeRole].activeIndex = -1;
-    try { state[activeRole].input.focus(); } catch (e) {}
-    state[activeRole].suggestionsEl.removeAttribute('aria-activedescendant');
-    state[activeRole].suggestionsEl.setAttribute('aria-expanded', 'false');
+    const currentRole = activeRole; // Save it before potentially clearing
+    state[currentRole].suggestionsEl.innerHTML = '';
+    state[currentRole].lastResults = [];
+    state[currentRole].activeIndex = -1;
+
+    if (activeRole === 'source' && !selected.target) {
+      setTimeout(() => {
+        state.target.input.focus();
+        updateMapCursor();
+      }, 0);
+    } else if (activeRole === 'target' && !selected.source) {
+      setTimeout(() => {
+        state.source.input.focus();
+        updateMapCursor();
+      }, 0);
+    } else {
+      // If both are selected, clear activeRole and reset cursor
+      activeRole = null;
+      state.source.input.classList.remove('active');
+      state.target.input.classList.remove('active');
+      updateMapCursor();
+    }
+
+    state[currentRole].suggestionsEl.removeAttribute('aria-activedescendant');
+    state[currentRole].suggestionsEl.setAttribute('aria-expanded', 'false');
     fetchAndRenderRouteIfReady().catch(console.error);
   });
 
