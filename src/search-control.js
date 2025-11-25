@@ -90,8 +90,62 @@ export default async function initSearchControl(map, opts = {}) {
   const sourceSug = container.querySelector('#mlSourceSuggestions');
   const targetSug = container.querySelector('#mlTargetSuggestions');
   const statusEl = container.querySelector('#mlStatus');
-  const clearBtn = container.querySelector('#mlClearBtn');
+  const swapBtn = container.querySelector('#mlSwapBtn');
+  const settingsBtn = container.querySelector('#mlSettingsBtn');
+  const settingsPanel = container.querySelector('#mlSettingsPanel');
+  const settingsGrid = container.querySelector('#mlSettingsGrid');
+  const yearSlider = container.querySelector('#mlYearSlider');
+  const yearValue = container.querySelector('#mlYearValue');
   const sidebar = container.querySelector('#mlSidebar');
+
+  // Settings state (initialized early so UI works even if data fetch fails)
+  const settingsState = {
+    year: 1914,
+    allowedModes: {
+      'walk': true,
+      'road': true,
+      'chaussee': true,
+      'connection': true,
+      'transfer': true,
+      'switch': true,
+      'horse tramway': true,
+      'electric tramway': true,
+      'steam tramway': true,
+      'tramway': true,
+      'tram': true,
+      'railway': true,
+      'narrow-gauge railway': true,
+      'ferry': true,
+      'ship': true,
+      'metro': true,
+      'funicular': true
+    }
+  };
+
+  // Populate settings grid with mode checkboxes
+  Object.keys(settingsState.allowedModes).forEach(mode => {
+    const label = document.createElement('label');
+    label.className = 'ml-settings-mode';
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = true;
+    checkbox.dataset.mode = mode;
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(' ' + mode));
+    settingsGrid.appendChild(label);
+  });
+
+  // Year slider live update
+  yearSlider.addEventListener('input', () => {
+    yearValue.textContent = yearSlider.value;
+  });
+
+  // Settings button toggle
+  settingsBtn.addEventListener('click', () => {
+    const isExpanded = settingsBtn.getAttribute('aria-expanded') === 'true';
+    settingsBtn.setAttribute('aria-expanded', String(!isExpanded));
+    settingsPanel.hidden = isExpanded;
+  });
 
   // ---- Collapse toggle button setup ----
   // We append the toggle to the map container so it can live fully outside the sidebar.
@@ -249,8 +303,28 @@ export default async function initSearchControl(map, opts = {}) {
   const selected = { source: null, target: null };
   const state = {
     source: { input: sourceBox, suggestionsEl: sourceSug, lastResults: [], activeIndex: -1, debounce: null },
-    target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null }
+    target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null },
+    settings: settingsState  // Reference the early-initialized settings
   };
+
+  // Swap button functionality (defined here, wired after fetchAndRenderRouteIfReady is defined)
+  function swapInputsAndSelected() {
+    // Swap input values
+    const tempValue = sourceBox.value;
+    sourceBox.value = targetBox.value;
+    targetBox.value = tempValue;
+
+    // Swap selected features
+    const tempFeature = selected.source;
+    setSelectedFeature('source', selected.target);
+    setSelectedFeature('target', tempFeature);
+
+    // Focus the target input
+    targetBox.focus();
+
+    // Recalculate route
+    fetchAndRenderRouteIfReady().catch(console.error);
+  }
 
   let activeRole = null;
 
@@ -282,6 +356,7 @@ export default async function initSearchControl(map, opts = {}) {
     switch: 'subway_walk',
       'horse tramway': 'cable_car',
       'electric tramway': 'tram',
+      'steam tramway': 'directions_railway_2',
       railway: 'train',
       'narrow-gauge railway': 'directions_railway_2',
       ferry: 'directions_boat',
@@ -857,7 +932,7 @@ export default async function initSearchControl(map, opts = {}) {
     const sid = selected.source.properties.id;
     const tid = selected.target.properties.id;
     if (!sid || !tid) return;
-    const url = `${apiBase}/v2/route?source=${encodeURIComponent(sid)}&target=${encodeURIComponent(tid)}&year=1914`;
+    const url = `${apiBase}/v2/route?source=${encodeURIComponent(sid)}&target=${encodeURIComponent(tid)}&year=${state.settings.year}`;
     try {
       statusEl.textContent = 'Loading route…';
       const res = await fetch(url, { cache: 'no-store' });
@@ -1151,6 +1226,24 @@ export default async function initSearchControl(map, opts = {}) {
     }
   }
 
+  // Wire up event handlers that depend on fetchAndRenderRouteIfReady
+  swapBtn.addEventListener('click', swapInputsAndSelected);
+
+  // Add change listeners to all mode checkboxes
+  settingsGrid.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+    checkbox.addEventListener('change', () => {
+      const mode = checkbox.dataset.mode;
+      state.settings.allowedModes[mode] = checkbox.checked;
+      fetchAndRenderRouteIfReady().catch(console.error);
+    });
+  });
+
+  // Year slider change triggers route recalculation
+  yearSlider.addEventListener('change', () => {
+    state.settings.year = parseInt(yearSlider.value, 10);
+    fetchAndRenderRouteIfReady().catch(console.error);
+  });
+
   function selectForRole(role, index) {
     const st = state[role];
     const r = st.lastResults[index];
@@ -1361,20 +1454,6 @@ export default async function initSearchControl(map, opts = {}) {
   fetchAndRenderRouteIfReady().catch(console.error);
   });
 
-  clearBtn.addEventListener('click', () => {
-    setSelectedFeature('source', null);
-    setSelectedFeature('target', null);
-    try { map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] }); } catch (e) {}
-    sourceSug.innerHTML = '';
-    targetSug.innerHTML = '';
-    state.source.lastResults = [];
-    state.target.lastResults = [];
-    statusEl.textContent = `${allFeatures.length} points loaded`;
-    updateSidebarForRoute(null).catch(() => {});
-  });
-
-  statusEl.textContent = `${allFeatures.length} points loaded`;
-
   try {
     setTimeout(() => {
       sourceBox && sourceBox.focus && sourceBox.focus();
@@ -1385,7 +1464,8 @@ export default async function initSearchControl(map, opts = {}) {
     }, 0);
   } catch (e) {}
 
-  return {
+  // Expose _searchControl for testing/debugging
+  const searchControlApi = {
     setSource(idOrFeature) {
       if (!idOrFeature) return setSelectedFeature('source', null);
       if (typeof idOrFeature === 'string' || typeof idOrFeature === 'number') {
@@ -1401,8 +1481,14 @@ export default async function initSearchControl(map, opts = {}) {
       } else setSelectedFeature('target', idOrFeature);
     },
     getSelected() { return { ...selected }; },
-    getFeatures() { return allFeatures; }
+    getFeatures() { return allFeatures; },
+    swap: swapInputsAndSelected,
+    settings: state.settings
   };
+
+  window._searchControl = searchControlApi;
+
+  return searchControlApi;
 }
 
 window.initSearchControl = initSearchControl;
@@ -1415,6 +1501,9 @@ function createContainerHTML() {
   <input id="mlSourceBox" class="ml-input" placeholder="Search starting point..." autocomplete="off" />
   <div class="suggestions" id="mlSourceSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
+  <div class="swap-col">
+  <button type="button" id="mlSwapBtn" class="icon-btn" aria-label="Swap source and destination" title="Swap source and destination">⇄</button>
+  </div>
   <div class="search-col">
   <label class="search-label">Destination</label>
   <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
@@ -1422,8 +1511,16 @@ function createContainerHTML() {
   </div>
   </div>
   <div class="controls">
-  <div class="small-note" id="mlStatus">Loading points…</div>
-  <div><button id="mlClearBtn" class="secondary">Clear</button></div>
+  <div class="small-note" id="mlStatus"></div>
+  <button type="button" id="mlSettingsBtn" class="icon-btn" aria-label="Settings" aria-expanded="false" title="Settings">⚙</button>
+  </div>
+  <div id="mlSettingsPanel" class="ml-settings-panel" hidden>
+  <div class="ml-settings-grid" id="mlSettingsGrid"></div>
+  <div class="ml-settings-year">
+  <label for="mlYearSlider">Year:</label>
+  <input type="range" id="mlYearSlider" min="1860" max="1918" step="1" value="1914" />
+  <span id="mlYearValue">1914</span>
+  </div>
   </div>
   <div id="mlSidebar" class="ml-sidebar" aria-live="polite"></div>
   `;
