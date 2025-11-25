@@ -52,7 +52,25 @@ function initMap() {
   window._mlMap = map;
 
   map.on('load', async () => {
-    console.log('Map loaded successfully');
+
+
+    // Add 3D terrain tiles
+    map.addSource("terrain-source", {
+      "type": "raster-dem",
+      "url": "https://api.maptiler.com/tiles/terrain-rgb/tiles.json?key=O9wOLjIC6FtbZ5aGuxHA",
+    });
+
+    map.setTerrain({
+      "source": "terrain-source",
+      "exaggeration": 1.5
+    });
+
+    //Optional: Add hillshading
+    // map.addLayer({
+    //   "id": "hillshading",
+    //   "source": "terrain-source",
+    //   "type": "hillshade"
+    // });
 
     const apiBase = resolveApiBase();
 

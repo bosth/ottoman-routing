@@ -552,7 +552,6 @@ export default async function initSearchControl(map, opts = {}) {
         }
       }
     }
-
     const flowRowsHtml = rows.map((row, rowIdx) => {
       if (row.type === 'node') {
         const label = escapeHtml(String(row.label || ''));
@@ -591,10 +590,19 @@ export default async function initSearchControl(map, opts = {}) {
           }
         }
 
+        let nodeColor = '';
+        if (rowIdx === 0) {
+          // First node - green (source)
+          nodeColor = 'style="background-color: #2e7d32; border-color: #2e7d32;"';
+        } else if (rowIdx === rows.length - 1) {
+          // Last node - red (target)
+          nodeColor = 'style="background-color: #d32f2f; border-color: #d32f2f;"';
+        }
+
         return `
         <div class="ml-flow-row ml-flow-row-node">
         <div class="ml-flow-left">
-        <span class="ml-node"></span>
+        <span class="ml-node" ${nodeColor}></span>
         </div>
         <div class="ml-flow-right ml-flow-right-node">
         <div class="ml-node-main">
@@ -603,7 +611,6 @@ export default async function initSearchControl(map, opts = {}) {
         </div>
         </div>`;
       }
-
 
       // Segment rendering stays the same...
       const segColor = String(row.color || '#000000');
@@ -1036,7 +1043,7 @@ export default async function initSearchControl(map, opts = {}) {
             'line-dasharray': [
               'case',
               ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], ['literal', [0, 4]],
-              ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship']]], ['literal', [4, 4]],
+              ['in', ['get', 'ml_mode_lower'], ['literal', ['ferry', 'ship', 'metro']]], ['literal', [4, 4]],
               ['literal', [1, 0]]
             ],
             'line-opacity': 0.95
@@ -1215,6 +1222,16 @@ export default async function initSearchControl(map, opts = {}) {
         } else if (st.lastResults && st.lastResults.length) {
           selectForRole(role, 0);
         }
+
+        // Clear active state after selection via keyboard
+        if (selected.source && selected.target) {
+          activeRole = null;
+          state.source.input.classList.remove('active');
+          state.target.input.classList.remove('active');
+          updateMapCursor();
+          st.input.blur(); // Remove focus to deactivate the input
+        }
+
         return;
       }
       if (key === 'ArrowDown' || key === 'ArrowUp') {
