@@ -169,6 +169,117 @@ if (targetClearBtn) {
     toggleBtn.style.left = `${sidebarRight}px`;
   }
 
+  const settingsBtn = container. querySelector('#mlSettingsBtn');
+const settingsPanel = container.querySelector('#mlSettingsPanel');
+
+// Add settings state to the state object (modify the existing state declaration around line 319)
+const selected = { source: null, target: null };
+const state = {
+  source: { input: sourceBox, suggestionsEl: sourceSug, lastResults: [], activeIndex: -1, debounce: null },
+  target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null },
+  settings: { year: 1914, allowedModes: {} }
+};
+
+// Settings button handler and population function
+function populateSettingsPanel() {
+  if (!settingsPanel) return;
+
+  const modes = [
+    'walk', 'road', 'chaussee', 'connection', 'transfer', 'switch',
+    'horse tramway', 'electric tramway', 'steam tramway', 'tramway', 'tram',
+    'railway', 'narrow-gauge railway', 'ferry', 'ship', 'metro', 'funicular'
+  ];
+
+  // Create grid container
+  const grid = document.createElement('div');
+  grid.className = 'ml-settings-grid';
+
+  modes.forEach(mode => {
+    const safeId = String(mode).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, ''). toLowerCase();
+    const id = `mlMode_${safeId}`;
+    const label = document.createElement('label');
+    label.className = 'ml-settings-item';
+    label.htmlFor = id;
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox. id = id;
+    checkbox. checked = true;
+    checkbox. dataset.mode = mode;
+    checkbox.className = 'ml-mode-checkbox';
+
+    // Initialize settings state
+    state. settings. allowedModes[mode] = true;
+
+    checkbox.addEventListener('change', () => {
+      state.settings. allowedModes[mode] = checkbox.checked;
+      // Recalculate route
+      fetchAndRenderRouteIfReady().catch(console.error);
+    });
+
+    const span = document.createElement('span');
+    span.className = 'ml-settings-item-label';
+    span.textContent = mode;
+
+    label.appendChild(checkbox);
+    label.appendChild(span);
+    grid.appendChild(label);
+  });
+
+  // Year slider row
+  const sliderRow = document.createElement('div');
+  sliderRow.className = 'ml-settings-slider-row';
+  sliderRow.innerHTML = `
+    <label for="mlYearSlider" class="ml-settings-slider-label">Year</label>
+    <div class="ml-settings-slider-wrap">
+      <input id="mlYearSlider" type="range" min="1860" max="1918" step="1" value="${state.settings.year}" />
+      <span id="mlYearValue" class="ml-year-value">${state.settings. year}</span>
+    </div>
+  `;
+
+  // Wire up slider
+  const slider = sliderRow.querySelector('#mlYearSlider');
+  const yearValue = sliderRow. querySelector('#mlYearValue');
+  slider.addEventListener('input', () => {
+    state.settings.year = Number(slider.value);
+    yearValue.textContent = String(state.settings.year);
+    // Recalculate route
+    fetchAndRenderRouteIfReady().catch(console.error);
+  });
+
+  // Append to panel
+  settingsPanel.appendChild(grid);
+  settingsPanel. appendChild(sliderRow);
+}
+
+// Settings button click handler
+if (settingsBtn && settingsPanel) {
+  settingsBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const isOpen = settingsPanel.style.display !== 'none';
+
+    if (isOpen) {
+      settingsPanel.style.display = 'none';
+      settingsBtn.setAttribute('aria-expanded', 'false');
+      container.classList.remove('ml-settings-open');
+    } else {
+      settingsPanel.style. display = 'block';
+      settingsBtn.setAttribute('aria-expanded', 'true');
+      container.classList.add('ml-settings-open');
+
+      // Populate settings panel if not already done
+      if (!settingsPanel.dataset.initialized) {
+        populateSettingsPanel();
+        settingsPanel. dataset.initialized = '1';
+      }
+    }
+  });
+} else {
+  console.warn('Settings button or panel not found', { settingsBtn, settingsPanel });
+}
+
   // Initial expanded position
   requestAnimationFrame(positionToggleExpanded);
 
@@ -287,12 +398,6 @@ if (targetClearBtn) {
   if (!map.getSource('search-route')) {
     map.addSource('search-route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
   }
-
-  const selected = { source: null, target: null };
-  const state = {
-    source: { input: sourceBox, suggestionsEl: sourceSug, lastResults: [], activeIndex: -1, debounce: null },
-    target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null }
-  };
 
   let activeRole = null;
 
@@ -890,19 +995,21 @@ const modeSymbolMap = {
     }
   }
 
-  async function fetchAndRenderRouteIfReady() {
-    if (!selected.source || !selected.target) {
-      try {
-        if (map.getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
-        if (map.getSource('search-route-ends')) map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: [] });
-      } catch (e) {}
-      await updateSidebarForRoute(null);
-      return;
-    }
-    const sid = selected.source.properties.id;
-    const tid = selected.target.properties.id;
-    if (!sid || !tid) return;
-    const url = `${apiBase}/v2/route?source=${encodeURIComponent(sid)}&target=${encodeURIComponent(tid)}&year=1914`;
+async function fetchAndRenderRouteIfReady() {
+  if (!selected.source || !selected.target) {
+    try {
+      if (map. getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
+      if (map.getSource('search-route-ends')) map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: [] });
+    } catch (e) {}
+    await updateSidebarForRoute(null);
+    return;
+  }
+  const sid = selected.source.properties.id;
+  const tid = selected.target.properties.id;
+  if (! sid || !tid) return;
+  const year = (state.settings && state.settings.year) ?  Number(state.settings.year) : 1914;
+  const url = `${apiBase}/v2/route?source=${encodeURIComponent(sid)}&target=${encodeURIComponent(tid)}&year=${encodeURIComponent(year)}`;
+
     try {
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('Route fetch failed: ' + res.status);
@@ -1455,7 +1562,11 @@ function createContainerHTML() {
   </div>
   <div class="suggestions" id="mlTargetSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
+  <div class="ml-button-row">
+    <button type="button" id="mlSettingsBtn" class="ml-icon-btn" aria-label="Settings" title="Settings" aria-expanded="false">⚙</button>
   </div>
+  </div>
+  <div id="mlSettingsPanel" class="ml-settings-panel" style="display:none;"></div>
   <div id="mlSidebar" class="ml-sidebar" aria-live="polite"></div>
   `;
 }
