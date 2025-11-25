@@ -89,8 +89,6 @@ export default async function initSearchControl(map, opts = {}) {
   const targetBox = container.querySelector('#mlTargetBox');
   const sourceSug = container.querySelector('#mlSourceSuggestions');
   const targetSug = container.querySelector('#mlTargetSuggestions');
-  const statusEl = container.querySelector('#mlStatus');
-  const clearBtn = container.querySelector('#mlClearBtn');
   const sidebar = container.querySelector('#mlSidebar');
 
   // ---- Collapse toggle button setup ----
@@ -183,7 +181,6 @@ export default async function initSearchControl(map, opts = {}) {
     geojson = await getDataOrFetchLocal();
   } catch (err) {
     console.error('Failed to load node data:', err);
-    statusEl.textContent = 'Error loading points';
     return;
   }
 
@@ -859,7 +856,6 @@ export default async function initSearchControl(map, opts = {}) {
     if (!sid || !tid) return;
     const url = `${apiBase}/v2/route?source=${encodeURIComponent(sid)}&target=${encodeURIComponent(tid)}&year=1914`;
     try {
-      statusEl.textContent = 'Loading route…';
       const res = await fetch(url, { cache: 'no-store' });
       if (!res.ok) throw new Error('Route fetch failed: ' + res.status);
       const routeGeo = await res.json();
@@ -1143,10 +1139,8 @@ export default async function initSearchControl(map, opts = {}) {
 
       await updateSidebarForRoute(routeGeo);
 
-      statusEl.textContent = 'Route loaded';
     } catch (err) {
       console.error('Failed to fetch/render route:', err && err.message ? err.message : err);
-      statusEl.textContent = 'Error loading route';
       await updateSidebarForRoute(null);
     }
   }
@@ -1172,7 +1166,7 @@ export default async function initSearchControl(map, opts = {}) {
     fetchAndRenderRouteIfReady().catch(console.error);
   }
 
-  Object.keys(state).forEach(role => {
+  ['source', 'target'].forEach(role => {
     const st = state[role];
 
     st.suggestionsEl.setAttribute('role', 'listbox');
@@ -1361,20 +1355,6 @@ export default async function initSearchControl(map, opts = {}) {
   fetchAndRenderRouteIfReady().catch(console.error);
   });
 
-  clearBtn.addEventListener('click', () => {
-    setSelectedFeature('source', null);
-    setSelectedFeature('target', null);
-    try { map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] }); } catch (e) {}
-    sourceSug.innerHTML = '';
-    targetSug.innerHTML = '';
-    state.source.lastResults = [];
-    state.target.lastResults = [];
-    statusEl.textContent = `${allFeatures.length} points loaded`;
-    updateSidebarForRoute(null).catch(() => {});
-  });
-
-  statusEl.textContent = `${allFeatures.length} points loaded`;
-
   try {
     setTimeout(() => {
       sourceBox && sourceBox.focus && sourceBox.focus();
@@ -1422,8 +1402,6 @@ function createContainerHTML() {
   </div>
   </div>
   <div class="controls">
-  <div class="small-note" id="mlStatus">Loading points…</div>
-  <div><button id="mlClearBtn" class="secondary">Clear</button></div>
   </div>
   <div id="mlSidebar" class="ml-sidebar" aria-live="polite"></div>
   `;
