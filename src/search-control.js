@@ -100,6 +100,51 @@ export default async function initSearchControl(map, opts = {}) {
   toggleBtn.textContent = '⟨'; // collapse arrow
   mapContainer.appendChild(toggleBtn);
 
+  // Get clear buttons
+const sourceClearBtn = container.querySelector('#mlSourceClear');
+const targetClearBtn = container.querySelector('#mlTargetClear');
+
+// Function to show/hide clear buttons based on input value
+function updateClearButtonVisibility(role) {
+  const st = state[role];
+  const clearBtn = role === 'source' ? sourceClearBtn : targetClearBtn;
+  if (! clearBtn) return;
+
+  const hasValue = st.input.value. trim(). length > 0 || selected[role] !== null;
+  clearBtn. style.display = hasValue ? 'flex' : 'none';
+}
+
+// Wire up clear button handlers
+if (sourceClearBtn) {
+  sourceClearBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedFeature('source', null);
+    state.source.input.value = '';
+    state.source.lastResults = [];
+    state.source.suggestionsEl.innerHTML = '';
+    updateClearButtonVisibility('source');
+    fetchAndRenderRouteIfReady(). catch(console.error);
+    // Focus back on input
+    setTimeout(() => state.source.input.focus(), 0);
+  });
+}
+
+if (targetClearBtn) {
+  targetClearBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSelectedFeature('target', null);
+    state.target.input.value = '';
+    state.target.lastResults = [];
+    state.target.suggestionsEl.innerHTML = '';
+    updateClearButtonVisibility('target');
+    fetchAndRenderRouteIfReady().catch(console.error);
+    // Focus back on input
+    setTimeout(() => state.target.input.focus(), 0);
+  });
+}
+
   function positionToggleExpanded() {
     // If collapsed, do not override fixed positioning
     if (container.classList.contains('ml-search-collapsed')) return;
@@ -364,12 +409,12 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   function setSelectedFeature(role, feat) {
-    if (!feat) selected[role] = null;
-    else selected[role] = feat;
+  if (! feat) selected[role] = null;
+  else selected[role] = feat;
 
-    const inp = state[role].input;
-    if (selected[role]) inp.value = selected[role].properties.name || selected[role].properties.id || '';
-    else inp.value = '';
+  const inp = state[role].input;
+  if (selected[role]) inp.value = selected[role].properties.name || selected[role].properties.id || '';
+  else inp.value = '';
 
     const feats = [];
     if (selected.source) feats.push({
@@ -400,6 +445,8 @@ export default async function initSearchControl(map, opts = {}) {
       try { if (map.getSource && map.getSource('search-selected')) map.removeSource('search-selected'); } catch (e2) {}
       map.addSource('search-selected', { type: 'geojson', data: fc });
     }
+      updateClearButtonVisibility(role);
+
   }
 
   async function formatCostMinutes(mins) {
@@ -1199,13 +1246,14 @@ export default async function initSearchControl(map, opts = {}) {
       try { st.input.focus(); } catch (e) {}
     });
 
-    st.input.addEventListener('input', () => {
-      if (st.debounce) clearTimeout(st.debounce);
-      st.debounce = setTimeout(() => {
-        const q = st.input.value.trim();
-        searchForRole(role, q);
-      }, 160);
-    });
+st.input.addEventListener('input', () => {
+  if (st. debounce) clearTimeout(st.debounce);
+  st.debounce = setTimeout(() => {
+    const q = st. input.value.trim();
+    searchForRole(role, q);
+  }, 160);
+  updateClearButtonVisibility(role); // ADD THIS LINE
+});
 
     st.input.addEventListener('keydown', (ev) => {
       const key = ev.key;
@@ -1392,16 +1440,20 @@ function createContainerHTML() {
   <div class="search-rows">
   <div class="search-col">
   <label class="search-label">Starting point</label>
-  <input id="mlSourceBox" class="ml-input" placeholder="Search starting point..." autocomplete="off" />
+  <div class="ml-input-wrapper">
+    <input id="mlSourceBox" class="ml-input" placeholder="Search starting point..." autocomplete="off" />
+    <button type="button" class="ml-input-clear" id="mlSourceClear" aria-label="Clear starting point" style="display:none;">×</button>
+  </div>
   <div class="suggestions" id="mlSourceSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
   <div class="search-col">
   <label class="search-label">Destination</label>
-  <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
+  <div class="ml-input-wrapper">
+    <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
+    <button type="button" class="ml-input-clear" id="mlTargetClear" aria-label="Clear destination" style="display:none;">×</button>
+  </div>
   <div class="suggestions" id="mlTargetSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
-  </div>
-  <div class="controls">
   </div>
   <div id="mlSidebar" class="ml-sidebar" aria-live="polite"></div>
   `;

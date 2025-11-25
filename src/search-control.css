@@ -64,6 +64,52 @@
   transition: box-shadow 120ms ease, border-color 120ms ease;
 }
 
+.ml-input-wrapper {
+  position: relative;
+  display: block;
+}
+
+.ml-input-wrapper . ml-input {
+  padding-right: 32px; /* Make room for clear button */
+  width: 100%;
+}
+
+/* Clear button inside input */
+.ml-input-clear {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: rgba(0, 0, 0, 0.1);
+  color: #666;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s, color 0.2s;
+}
+
+.ml-input-clear:hover {
+  background: rgba(0, 0, 0, 0.2);
+  color: #000;
+}
+
+. ml-input-clear:active {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+. ml-input-clear:focus {
+  outline: 2px solid #1a73e8;
+  outline-offset: 2px;
+}
+
 /* highlighted / active input */
 .ml-input.active,
 .ml-input:focus {
