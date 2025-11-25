@@ -315,21 +315,22 @@ if (targetClearBtn) {
     2: 'stop'
   };
 
-  const modeSymbolMap = {
-    walk: 'directions_walk',
-    road: 'directions_walk',
-    chaussee: 'directions_walk',
-    connection: 'subway_walk',
-    transfer: 'subway_walk',
-    switch: 'subway_walk',
-      'horse tramway': 'cable_car',
-      'electric tramway': 'tram',
-      railway: 'train',
-      'narrow-gauge railway': 'directions_railway_2',
-      ferry: 'directions_boat',
-      ship: 'anchor',
-      metro: 'funicular'
-  };
+const modeSymbolMap = {
+  walk: 'directions_walk',
+  road: 'directions_walk',
+  chaussee: 'directions_walk',
+  connection: 'subway_walk',
+  transfer: 'subway_walk',
+  switch: 'subway_walk',
+  'horse tramway': 'cable_car',
+  'electric tramway': 'tram',
+  railway: 'train',
+  'narrow-gauge railway': 'directions_railway_2',
+  'steam tramway': 'directions_railway_2',  // ADD THIS LINE
+  ferry: 'directions_boat',
+  ship: 'anchor',
+  metro: 'funicular'
+};
 
   function renderSuggestionsForRole(role) {
     const st = state[role];
