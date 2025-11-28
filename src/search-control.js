@@ -75,9 +75,9 @@ export default async function initSearchControl(map, opts = {}) {
     container.className = 'map-search-container';
     container.style.position = 'absolute';
     container.style.top = '12px';
-    container.style.left = '12px';
+    container.style.left = '0';
     container.style.zIndex = 1000;
-    container.style.width = '340px'; // narrower sidebar; CSS also sets width, this is a fallback
+    container.style.width = '340px';
     container.setAttribute('aria-live', 'polite');
     container.innerHTML = createContainerHTML();
     mapContainer.appendChild(container);
@@ -85,71 +85,288 @@ export default async function initSearchControl(map, opts = {}) {
     container.innerHTML = createContainerHTML();
   }
 
-  const sourceBox = container.querySelector('#mlSourceBox');
+  // Get all DOM elements
+    const sourceBox = container.querySelector('#mlSourceBox');
   const targetBox = container.querySelector('#mlTargetBox');
   const sourceSug = container.querySelector('#mlSourceSuggestions');
   const targetSug = container.querySelector('#mlTargetSuggestions');
   const sidebar = container.querySelector('#mlSidebar');
+  const sourceClearBtn = container.querySelector('#mlSourceClear');
+  const targetClearBtn = container.querySelector('#mlTargetClear');
+  const settingsPanel = container.querySelector('#mlSettingsPanel');
 
-  // ---- Collapse toggle button setup ----
-  // We append the toggle to the map container so it can live fully outside the sidebar.
+  // Get route tab elements
+  const sourceBoxRoute = container.querySelector('#mlSourceBoxRoute');
+  const sourceSugRoute = container.querySelector('#mlSourceSuggestionsRoute');
+    const sourceClearBtnRoute = container.querySelector('#mlSourceClearRoute');
+
+  const routeBtn = container.querySelector('#mlRouteBtn');
+  const routeTabBtn = container.querySelector('[data-tab="route"]');
+
+  // Update route button and tab state
+  function updateRouteButtonState() {
+    const hasSource = !!selected.source;
+
+    if (routeBtn) {
+      routeBtn.disabled = !hasSource;
+    }
+
+    if (routeTabBtn) {
+      routeTabBtn.disabled = !hasSource;
+    }
+  }
+
+  // Handle route button click
+  // Handle route button click
+  if (routeBtn) {
+    routeBtn.addEventListener('click', () => {
+      if (! selected.source) return;
+
+      // Copy source to route tab
+      if (sourceBoxRoute) {
+        sourceBoxRoute.value = sourceBox.value;
+      }
+
+      // Switch to route tab
+      tabButtons.forEach(b => b.classList.remove('active'));
+      if (routeTabBtn) routeTabBtn.classList.add('active');
+
+      tabContents.forEach(content => content.classList.remove('active'));
+      const routeTabContent = container.querySelector('#mlTabRoute');
+      if (routeTabContent) routeTabContent.classList.add('active');
+
+      // Focus on target input and select any existing text
+      setTimeout(() => {
+        if (targetBox) {
+          targetBox.focus();
+          // Select all text if there is any
+          if (targetBox.value) {
+            targetBox.select();
+          }
+        }
+      }, 100);
+    });
+  }
+
+  // Handle route button click
+  if (routeBtn) {
+    routeBtn.addEventListener('click', () => {
+      if (! selected.source) return;
+
+      // Copy source to route tab
+      if (sourceBoxRoute) {
+        sourceBoxRoute.value = sourceBox.value;
+      }
+
+      // Switch to route tab
+      tabButtons.forEach(b => b.classList.remove('active'));
+      const routeTabBtn = container.querySelector('[data-tab="route"]');
+      if (routeTabBtn) routeTabBtn.classList.add('active');
+
+      tabContents.forEach(content => content.classList.remove('active'));
+      const routeTabContent = container.querySelector('#mlTabRoute');
+      if (routeTabContent) routeTabContent.classList.add('active');
+
+      // Focus on target input
+      setTimeout(() => {
+        if (targetBox) targetBox.focus();
+      }, 100);
+    });
+  }
+
+  // Sync clear button for route tab source
+  if (sourceClearBtnRoute) {
+    sourceClearBtnRoute.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (sourceBoxRoute) sourceBoxRoute.value = '';
+      if (sourceSugRoute) sourceSugRoute.innerHTML = '';
+      updateClearButtonVisibility('source');
+      setTimeout(() => sourceBoxRoute.focus(), 0);
+    });
+  }
+
+  // Keep both source boxes in sync
+  if (sourceBox && sourceBoxRoute) {
+    sourceBox.addEventListener('input', () => {
+      sourceBoxRoute.value = sourceBox.value;
+    });
+    sourceBoxRoute.addEventListener('input', () => {
+      sourceBox.value = sourceBoxRoute.value;
+    });
+  }
+
+  // Sync clear buttons
+  if (sourceClearBtnRoute) {
+    sourceClearBtnRoute.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectedFeature('source', null);
+      state.source.input.value = '';
+      if (sourceBoxRoute) sourceBoxRoute.value = '';
+      state.source.lastResults = [];
+      state.source.suggestionsEl.innerHTML = '';
+      if (sourceSugRoute) sourceSugRoute.innerHTML = '';
+      updateClearButtonVisibility('source');
+      fetchAndRenderRouteIfReady().catch(console.error);
+      setTimeout(() => state.source.input.focus(), 0);
+    });
+  }
+
+  // Initialize state BEFORE using it
+  const selected = { source: null, target: null };
+  const state = {
+    source: { input: sourceBox, suggestionsEl: sourceSug, lastResults: [], activeIndex: -1, debounce: null },
+    target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null },
+    settings: { year: 1914, allowedModes: {} }
+  };
+
+  // Define populateSettingsPanel BEFORE calling it
+  function populateSettingsPanel() {
+    if (!settingsPanel) return;
+
+    const modes = [
+      'walk', 'road', 'chaussee', 'connection', 'transfer', 'switch',
+      'horse tramway', 'electric tramway', 'steam tramway', 'tramway', 'tram',
+      'railway', 'narrow-gauge railway', 'ferry', 'ship', 'metro', 'funicular'
+    ];
+
+    const grid = document.createElement('div');
+    grid.className = 'ml-settings-grid';
+
+    modes.forEach(mode => {
+      const safeId = String(mode).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+      const id = `mlMode_${safeId}`;
+      const label = document.createElement('label');
+      label.className = 'ml-settings-item';
+      label.htmlFor = id;
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.id = id;
+      checkbox.checked = true;
+      checkbox.dataset.mode = mode;
+      checkbox.className = 'ml-mode-checkbox';
+
+      state.settings.allowedModes[mode] = true;
+
+      checkbox.addEventListener('change', () => {
+        state.settings.allowedModes[mode] = checkbox.checked;
+        fetchAndRenderRouteIfReady().catch(console.error);
+      });
+
+      const span = document.createElement('span');
+      span.className = 'ml-settings-item-label';
+      span.textContent = mode;
+
+      label.appendChild(checkbox);
+      label.appendChild(span);
+      grid.appendChild(label);
+    });
+
+    const sliderRow = document.createElement('div');
+    sliderRow.className = 'ml-settings-slider-row';
+    sliderRow.innerHTML = `
+      <label for="mlYearSlider" class="ml-settings-slider-label">Year</label>
+      <div class="ml-settings-slider-wrap">
+        <input id="mlYearSlider" type="range" min="1860" max="1918" step="1" value="${state.settings.year}" />
+        <span id="mlYearValue" class="ml-year-value">${state.settings.year}</span>
+      </div>
+    `;
+
+    const slider = sliderRow.querySelector('#mlYearSlider');
+    const yearValue = sliderRow.querySelector('#mlYearValue');
+    slider.addEventListener('input', () => {
+      state.settings.year = Number(slider.value);
+      yearValue.textContent = String(state.settings.year);
+      fetchAndRenderRouteIfReady().catch(console.error);
+    });
+
+    settingsPanel.appendChild(grid);
+    settingsPanel.appendChild(sliderRow);
+  }
+
+  // Tab switching logic
+  const tabButtons = container.querySelectorAll('.ml-tab-btn');
+  const tabContents = container.querySelectorAll('.ml-tab-content');
+
+  tabButtons.forEach(btn => {
+    btn.addEventListener('click', () => {
+      // Don't switch if button is disabled
+      if (btn.disabled) return;
+
+      const targetTab = btn.getAttribute('data-tab');
+
+      tabButtons.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      tabContents.forEach(content => {
+        content.classList.remove('active');
+      });
+
+      const targetContent = container.querySelector(`#mlTab${targetTab.charAt(0).toUpperCase() + targetTab.slice(1)}`);
+      if (targetContent) {
+        targetContent.classList.add('active');
+      }
+    });
+  });
+
+  // Initialize Settings tab
+  if (settingsPanel && !settingsPanel.dataset.initialized) {
+    populateSettingsPanel();
+    settingsPanel.dataset.initialized = '1';
+  }
+
+  // Collapse toggle button setup
   const toggleBtn = document.createElement('button');
   toggleBtn.type = 'button';
   toggleBtn.className = 'ml-search-toggle';
   toggleBtn.setAttribute('aria-label', 'Toggle search sidebar');
-  toggleBtn.textContent = '⟨'; // collapse arrow
+  toggleBtn.textContent = '⟨';
   mapContainer.appendChild(toggleBtn);
 
-  // Get clear buttons
-const sourceClearBtn = container.querySelector('#mlSourceClear');
-const targetClearBtn = container.querySelector('#mlTargetClear');
+  // Function to show/hide clear buttons
+  function updateClearButtonVisibility(role) {
+    const st = state[role];
+    const clearBtn = role === 'source' ? sourceClearBtn : targetClearBtn;
+    if (! clearBtn) return;
 
-// Function to show/hide clear buttons based on input value
-function updateClearButtonVisibility(role) {
-  const st = state[role];
-  const clearBtn = role === 'source' ? sourceClearBtn : targetClearBtn;
-  if (! clearBtn) return;
+    const hasValue = st.input.value.trim().length > 0 || selected[role] !== null;
+    clearBtn.style.display = hasValue ? 'flex' : 'none';
+  }
 
-  const hasValue = st.input.value. trim(). length > 0 || selected[role] !== null;
-  clearBtn. style.display = hasValue ? 'flex' : 'none';
-}
+  // Wire up clear button handlers
+  if (sourceClearBtn) {
+    sourceClearBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectedFeature('source', null);
+      state.source.input.value = '';
+      state.source.lastResults = [];
+      state.source.suggestionsEl.innerHTML = '';
+      updateClearButtonVisibility('source');
+      fetchAndRenderRouteIfReady().catch(console.error);
+      setTimeout(() => state.source.input.focus(), 0);
+    });
+  }
 
-// Wire up clear button handlers
-if (sourceClearBtn) {
-  sourceClearBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSelectedFeature('source', null);
-    state.source.input.value = '';
-    state.source.lastResults = [];
-    state.source.suggestionsEl.innerHTML = '';
-    updateClearButtonVisibility('source');
-    fetchAndRenderRouteIfReady(). catch(console.error);
-    // Focus back on input
-    setTimeout(() => state.source.input.focus(), 0);
-  });
-}
-
-if (targetClearBtn) {
-  targetClearBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSelectedFeature('target', null);
-    state.target.input.value = '';
-    state.target.lastResults = [];
-    state.target.suggestionsEl.innerHTML = '';
-    updateClearButtonVisibility('target');
-    fetchAndRenderRouteIfReady().catch(console.error);
-    // Focus back on input
-    setTimeout(() => state.target.input.focus(), 0);
-  });
-}
+  if (targetClearBtn) {
+    targetClearBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectedFeature('target', null);
+      state.target.input.value = '';
+      state.target.lastResults = [];
+      state.target.suggestionsEl.innerHTML = '';
+      updateClearButtonVisibility('target');
+      fetchAndRenderRouteIfReady().catch(console.error);
+      setTimeout(() => state.target.input.focus(), 0);
+    });
+  }
 
   function positionToggleExpanded() {
-    // If collapsed, do not override fixed positioning
     if (container.classList.contains('ml-search-collapsed')) return;
-
-    if (!sourceBox || !targetBox || !container.isConnected) return;
+    if (! sourceBox || !targetBox || !container.isConnected) return;
 
     const containerRect = container.getBoundingClientRect();
     const startRect = sourceBox.getBoundingClientRect();
@@ -157,11 +374,8 @@ if (targetClearBtn) {
 
     if (startRect.height === 0 || destRect.height === 0) return;
 
-    // Vertical center between the top of the start input and the bottom of the target input
     const midY = (startRect.top + destRect.bottom) / 2;
-
     const sidebarRight = containerRect.right;
-
     const toggleRect = toggleBtn.getBoundingClientRect();
     const halfH = toggleRect.height / 2 || 22;
 
@@ -169,119 +383,10 @@ if (targetClearBtn) {
     toggleBtn.style.left = `${sidebarRight}px`;
   }
 
-  const settingsBtn = container. querySelector('#mlSettingsBtn');
-const settingsPanel = container.querySelector('#mlSettingsPanel');
-
-// Add settings state to the state object (modify the existing state declaration around line 319)
-const selected = { source: null, target: null };
-const state = {
-  source: { input: sourceBox, suggestionsEl: sourceSug, lastResults: [], activeIndex: -1, debounce: null },
-  target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null },
-  settings: { year: 1914, allowedModes: {} }
-};
-
-// Settings button handler and population function
-function populateSettingsPanel() {
-  if (!settingsPanel) return;
-
-  const modes = [
-    'walk', 'road', 'chaussee', 'connection', 'transfer', 'switch',
-    'horse tramway', 'electric tramway', 'steam tramway', 'tramway', 'tram',
-    'railway', 'narrow-gauge railway', 'ferry', 'ship', 'metro', 'funicular'
-  ];
-
-  // Create grid container
-  const grid = document.createElement('div');
-  grid.className = 'ml-settings-grid';
-
-  modes.forEach(mode => {
-    const safeId = String(mode).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, ''). toLowerCase();
-    const id = `mlMode_${safeId}`;
-    const label = document.createElement('label');
-    label.className = 'ml-settings-item';
-    label.htmlFor = id;
-
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox. id = id;
-    checkbox. checked = true;
-    checkbox. dataset.mode = mode;
-    checkbox.className = 'ml-mode-checkbox';
-
-    // Initialize settings state
-    state. settings. allowedModes[mode] = true;
-
-    checkbox.addEventListener('change', () => {
-      state.settings. allowedModes[mode] = checkbox.checked;
-      // Recalculate route
-      fetchAndRenderRouteIfReady().catch(console.error);
-    });
-
-    const span = document.createElement('span');
-    span.className = 'ml-settings-item-label';
-    span.textContent = mode;
-
-    label.appendChild(checkbox);
-    label.appendChild(span);
-    grid.appendChild(label);
-  });
-
-  // Year slider row
-  const sliderRow = document.createElement('div');
-  sliderRow.className = 'ml-settings-slider-row';
-  sliderRow.innerHTML = `
-    <label for="mlYearSlider" class="ml-settings-slider-label">Year</label>
-    <div class="ml-settings-slider-wrap">
-      <input id="mlYearSlider" type="range" min="1860" max="1918" step="1" value="${state.settings.year}" />
-      <span id="mlYearValue" class="ml-year-value">${state.settings. year}</span>
-    </div>
-  `;
-
-  // Wire up slider
-  const slider = sliderRow.querySelector('#mlYearSlider');
-  const yearValue = sliderRow. querySelector('#mlYearValue');
-  slider.addEventListener('input', () => {
-    state.settings.year = Number(slider.value);
-    yearValue.textContent = String(state.settings.year);
-    // Recalculate route
-    fetchAndRenderRouteIfReady().catch(console.error);
-  });
-
-  // Append to panel
-  settingsPanel.appendChild(grid);
-  settingsPanel. appendChild(sliderRow);
-}
-
-// Settings button click handler
-if (settingsBtn && settingsPanel) {
-  settingsBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const isOpen = settingsPanel.style.display !== 'none';
-
-    if (isOpen) {
-      settingsPanel.style.display = 'none';
-      settingsBtn.setAttribute('aria-expanded', 'false');
-      container.classList.remove('ml-settings-open');
-    } else {
-      settingsPanel.style. display = 'block';
-      settingsBtn.setAttribute('aria-expanded', 'true');
-      container.classList.add('ml-settings-open');
-
-      // Populate settings panel if not already done
-      if (!settingsPanel.dataset.initialized) {
-        populateSettingsPanel();
-        settingsPanel. dataset.initialized = '1';
-      }
-    }
-  });
-} else {
-  console.warn('Settings button or panel not found', { settingsBtn, settingsPanel });
-}
 
   // Initial expanded position
   requestAnimationFrame(positionToggleExpanded);
+
 
   window.addEventListener('resize', () => {
     if (!container.classList.contains('ml-search-collapsed')) {
@@ -552,7 +657,7 @@ const modeSymbolMap = {
       map.addSource('search-selected', { type: 'geojson', data: fc });
     }
       updateClearButtonVisibility(role);
-
+    updateRouteButtonState(); // ADD THIS LINE
   }
 
   async function formatCostMinutes(mins) {
@@ -998,7 +1103,7 @@ const modeSymbolMap = {
 async function fetchAndRenderRouteIfReady() {
   if (!selected.source || !selected.target) {
     try {
-      if (map. getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
+      if (map.getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
       if (map.getSource('search-route-ends')) map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: [] });
     } catch (e) {}
     await updateSidebarForRoute(null);
@@ -1355,9 +1460,9 @@ async function fetchAndRenderRouteIfReady() {
     });
 
 st.input.addEventListener('input', () => {
-  if (st. debounce) clearTimeout(st.debounce);
+  if (st.debounce) clearTimeout(st.debounce);
   st.debounce = setTimeout(() => {
-    const q = st. input.value.trim();
+    const q = st.input.value.trim();
     searchForRole(role, q);
   }, 160);
   updateClearButtonVisibility(role); // ADD THIS LINE
@@ -1545,28 +1650,46 @@ window.initSearchControl = initSearchControl;
 
 function createContainerHTML() {
   return `
-  <div class="search-rows">
-  <div class="search-col">
-  <label class="search-label">Starting point</label>
-  <div class="ml-input-wrapper">
-    <input id="mlSourceBox" class="ml-input" placeholder="Search starting point..." autocomplete="off" />
-    <button type="button" class="ml-input-clear" id="mlSourceClear" aria-label="Clear starting point" style="display:none;">×</button>
+  <div class="ml-tab-bar">
+    <button type="button" class="ml-tab-btn active" data-tab="info">Information</button>
+    <button type="button" class="ml-tab-btn" data-tab="route" disabled>Route</button>
+    <button type="button" class="ml-tab-btn" data-tab="settings">Settings</button>
   </div>
-  <div class="suggestions" id="mlSourceSuggestions" role="listbox" aria-expanded="false"></div>
+
+  <div id="mlTabInfo" class="ml-tab-content active">
+    <div class="ml-input-wrapper-with-btn">
+      <div class="ml-input-wrapper">
+        <input id="mlSourceBox" class="ml-input" placeholder="Search for a location..." autocomplete="off" />
+        <button type="button" class="ml-input-clear" id="mlSourceClear" aria-label="Clear search" style="display:none;">×</button>
+      </div>
+      <button type="button" class="ml-route-btn" id="mlRouteBtn" aria-label="Plan route" title="Plan route from here" disabled>→</button>
+    </div>
+    <div class="suggestions" id="mlSourceSuggestions" role="listbox" aria-expanded="false"></div>
+    <div class="ml-info-content">
+      <p>Select a location to view information.</p>
+    </div>
   </div>
-  <div class="search-col">
-  <label class="search-label">Destination</label>
-  <div class="ml-input-wrapper">
-    <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
-    <button type="button" class="ml-input-clear" id="mlTargetClear" aria-label="Clear destination" style="display:none;">×</button>
+
+  <div id="mlTabRoute" class="ml-tab-content">
+    <div class="search-rows">
+      <div class="search-col">
+        <div class="ml-input-wrapper">
+          <input id="mlSourceBoxRoute" class="ml-input" placeholder="Starting point..." autocomplete="off" readonly />
+        </div>
+      </div>
+      <div class="search-col">
+        <div class="ml-input-wrapper">
+          <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
+          <button type="button" class="ml-input-clear" id="mlTargetClear" aria-label="Clear destination" style="display:none;">×</button>
+        </div>
+        <div class="suggestions" id="mlTargetSuggestions" role="listbox" aria-expanded="false"></div>
+      </div>
+    </div>
+    <div id="mlSidebar" class="ml-sidebar" aria-live="polite"></div>
   </div>
-  <div class="suggestions" id="mlTargetSuggestions" role="listbox" aria-expanded="false"></div>
+
+  <div id="mlTabSettings" class="ml-tab-content">
+    <div id="mlSettingsPanel" class="ml-settings-panel"></div>
   </div>
-  <div class="ml-button-row">
-    <button type="button" id="mlSettingsBtn" class="ml-icon-btn" aria-label="Settings" title="Settings" aria-expanded="false">⚙</button>
-  </div>
-  </div>
-  <div id="mlSettingsPanel" class="ml-settings-panel" style="display:none;"></div>
-  <div id="mlSidebar" class="ml-sidebar" aria-live="polite"></div>
   `;
 }

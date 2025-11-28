@@ -66,11 +66,11 @@ function initMap() {
     });
 
     //Optional: Add hillshading
-    // map.addLayer({
-    //   "id": "hillshading",
-    //   "source": "terrain-source",
-    //   "type": "hillshade"
-    // });
+    map.addLayer({
+      "id": "hillshading",
+      "source": "terrain-source",
+      "type": "hillshade"
+    });
 
     const apiBase = resolveApiBase();
 
