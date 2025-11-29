@@ -133,6 +133,66 @@ const state = {
   settings: { year: 1914, allowedModes: {} }
 };
 
+// Cache for node lines data to avoid repeated fetches
+const nodeLinesCache = new Map();
+
+// Helper function to fetch lines for a node
+async function fetchNodeLines(nodeId) {
+  if (! nodeId) return null;
+
+  // Check cache first
+  if (nodeLinesCache.has(String(nodeId))) {
+    return nodeLinesCache.get(String(nodeId));
+  }
+
+  try {
+    const year = (state.settings && state.settings.year) ?  Number(state.settings.year) : 1914;
+    const url = `${apiBase}/v2/nodes/${encodeURIComponent(nodeId)}?year=${encodeURIComponent(year)}`;
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+    const data = await res.json();
+
+    // The response is { json_agg: [...] } or similar
+    const lines = Array.isArray(data?.json_agg) ? data.json_agg :
+    Array.isArray(data) ? data : [];
+
+    // Cache the result
+    nodeLinesCache.set(String(nodeId), lines);
+    return lines;
+  } catch (err) {
+    console.warn('Failed to fetch lines for node', nodeId, err);
+    return null;
+  }
+}
+
+// Helper function to render lines into a card's lines container
+function renderNodeLines(linesContainer, lines) {
+  if (!linesContainer) return;
+
+  if (! lines || lines.length === 0) {
+    linesContainer.innerHTML = '<div class="ml-node-card-lines-error">No lines found</div>';
+    return;
+  }
+
+  const listHtml = lines.map(line => {
+    const name = escapeHtml(String(line.name || 'Unknown'));
+    const colour = line.colour || '#000000';
+    const mode = escapeHtml(String(line.mode || ''));
+
+    return `
+    <div class="ml-node-card-line">
+    <div class="ml-node-card-line-name" style="color: ${escapeHtml(colour)}">${name}</div>
+    ${mode ? `<div class="ml-node-card-line-mode">${mode}</div>` : ''}
+    </div>
+    `;
+  }).join('');
+
+  linesContainer.innerHTML = `
+  <div class="ml-node-card-lines-label">Lines</div>
+  <div class="ml-node-card-lines-list">${listHtml}</div>
+  `;
+}
+
 // Settings button handler and population function
 function populateSettingsPanel() {
   if (!settingsPanel) return;
@@ -192,6 +252,7 @@ function populateSettingsPanel() {
     yearValue.textContent = String(state.settings.year);
     // Recalculate route
     fetchAndRenderRouteIfReady().catch(console.error);
+    nodeLinesCache.clear(); // clear cache since year affects it
   });
 
   // Append to panel
@@ -482,7 +543,7 @@ if (settingsBtn && settingsPanel) {
   function getNodeById(nodeId) {
     if (!nodeId) return null;
     return allFeatures.find(f =>
-    f.properties && String(f.properties. id) === String(nodeId)
+    f.properties && String(f.properties.id) === String(nodeId)
     ) || null;
   }
 
@@ -498,8 +559,8 @@ if (settingsBtn && settingsPanel) {
   // Helper function to get node rank from ID
   function getNodeRank(nodeId) {
     const node = getNodeById(nodeId);
-    if (node && node. properties && node.properties.rank !== undefined) {
-      return Number(node.properties. rank);
+    if (node && node.properties && node.properties.rank !== undefined) {
+      return Number(node.properties.rank);
     }
     return null;
   }
@@ -510,26 +571,26 @@ if (settingsBtn && settingsPanel) {
     if (! nodeId) return String(nodeId);
 
     // Check if this node matches the selected source or target
-    if (selected. source && String(selected.source. properties.id) === String(nodeId)) {
-      return selected. source.properties.name || selected.source.properties.id || String(nodeId);
+    if (selected.source && String(selected.source.properties.id) === String(nodeId)) {
+      return selected.source.properties.name || selected.source.properties.id || String(nodeId);
     }
     if (selected.target && String(selected.target.properties.id) === String(nodeId)) {
-      return selected.target.properties.name || selected. target.properties.id || String(nodeId);
+      return selected.target.properties.name || selected.target.properties.id || String(nodeId);
     }
 
     // Fall back to finding a node with geometry
     const nodeWithGeometry = allFeatures.find(f =>
     f.properties &&
-    String(f.properties. id) === String(nodeId) &&
+    String(f.properties.id) === String(nodeId) &&
     f.geometry &&
-    f. geometry.coordinates &&
+    f.geometry.coordinates &&
     (f.geometry.type === 'Point' ?
-    (f.geometry.coordinates[0] !== 0 || f. geometry.coordinates[1] !== 0) :
+    (f.geometry.coordinates[0] !== 0 || f.geometry.coordinates[1] !== 0) :
     true)
     );
 
-    if (nodeWithGeometry && nodeWithGeometry. properties) {
-      return nodeWithGeometry.properties.name || nodeWithGeometry.properties. id || String(nodeId);
+    if (nodeWithGeometry && nodeWithGeometry.properties) {
+      return nodeWithGeometry.properties.name || nodeWithGeometry.properties.id || String(nodeId);
     }
 
     // Final fallback: any node with this ID
@@ -545,19 +606,19 @@ if (settingsBtn && settingsPanel) {
     const seen = new Set();
 
     // Normalize primary name for comparison
-    const primaryNormalized = String(primaryName || '').toLowerCase(). trim();
+    const primaryNormalized = String(primaryName || '').toLowerCase().trim();
     if (primaryNormalized) {
       seen.add(primaryNormalized);
     }
 
     // Find all features with matching ID
     allFeatures.forEach(f => {
-      if (! f.properties || String(f.properties. id) !== String(nodeId)) return;
+      if (! f.properties || String(f.properties.id) !== String(nodeId)) return;
 
       const name = f.properties.name;
       if (! name) return;
 
-      const nameNormalized = String(name).toLowerCase(). trim();
+      const nameNormalized = String(name).toLowerCase().trim();
       if (nameNormalized && !seen.has(nameNormalized)) {
         seen.add(nameNormalized);
         alternates.push(String(name)); // Use original casing
@@ -599,15 +660,15 @@ if (settingsBtn && settingsPanel) {
 
     if (! segs.length) {
       sidebar.innerHTML = '';
-      try { container.classList. remove('ml-search-fixed'); } catch (e) {}
+      try { container.classList.remove('ml-search-fixed'); } catch (e) {}
       return;
     }
 
     // Build nodes array with IDs and resolved names
     const nodeIds = [];
     const nodes = [];
-    nodeIds.push(segs[0]. sourceId);
-    nodes.push(segs[0]. source);
+    nodeIds.push(segs[0].sourceId);
+    nodes.push(segs[0].source);
     segs.forEach(s => {
       nodeIds.push(s.targetId);
       nodes.push(s.target);
@@ -668,7 +729,7 @@ if (settingsBtn && settingsPanel) {
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
 
-      if (step. kind === 'node') {
+      if (step.kind === 'node') {
         const next = steps[i + 1];
         const afterNext = steps[i + 2];
 
@@ -687,7 +748,7 @@ if (settingsBtn && settingsPanel) {
             label: step.label,
             nodeId: step.nodeId,
             switchLine: next.line,
-              switchCostHuman: next. costHuman,
+              switchCostHuman: next.costHuman,
                 rank: nodeRank
           });
           i += 2;
@@ -707,7 +768,7 @@ if (settingsBtn && settingsPanel) {
           rows.push({
             type: 'segment',
             idx: step.idx,
-            line: step. line,
+            line: step.line,
             mode: step.mode,
             color: step.color,
             costHuman: step.costHuman,
@@ -726,16 +787,16 @@ if (settingsBtn && settingsPanel) {
 
         // If rank not already set, look it up
         if (nodeRank === null || nodeRank === undefined) {
-          nodeRank = getNodeRank(row. nodeId);
+          nodeRank = getNodeRank(row.nodeId);
         }
 
         // Get rank label text (for expanded view)
-        const rankText = (nodeRank !== null && ! isNaN(nodeRank) && rankLabelMap. hasOwnProperty(nodeRank))
+        const rankText = (nodeRank !== null && ! isNaN(nodeRank) && rankLabelMap.hasOwnProperty(nodeRank))
         ? rankLabelMap[nodeRank]
         : '';
 
         // Get alternate names for this node
-        const alternateNames = getNodeAlternateNames(row. nodeId, row. label);
+        const alternateNames = getNodeAlternateNames(row.nodeId, row.label);
 
         // Determine node circle color
         let nodeStyle = '';
@@ -766,18 +827,25 @@ if (settingsBtn && settingsPanel) {
           </div>`;
         }
 
+        // Build lines HTML (hidden by default, shown when expanded, populated on first expand)
+        const linesHtml = `
+        <div class="ml-node-card-lines">
+        <div class="ml-node-card-lines-loading">Loading lines...</div>
+        </div>`;
+
         return `
         <div class="ml-flow-row ml-flow-row-node">
         <div class="ml-flow-left">
         <!-- Circle now rendered inside the card -->
         </div>
         <div class="ml-flow-right ml-flow-right-node">
-        <div class="ml-node-card" tabindex="0" role="button" aria-expanded="false" data-node-id="${escapeHtml(String(row.nodeId || ''))}">
+        <div class="ml-node-card" tabindex="0" role="button" aria-expanded="false" data-node-id="${escapeHtml(String(row.nodeId || ''))}" data-lines-loaded="false">
         <span class="ml-node" style="${nodeStyle}"></span>
         <div class="ml-node-card-content">
         <div class="ml-node-card-name">${label}</div>
         ${rankHtml}
         ${alternatesHtml}
+        ${linesHtml}
         </div>
         </div>
         </div>
@@ -786,8 +854,8 @@ if (settingsBtn && settingsPanel) {
 
       // Segment rendering stays the same...
       const segColor = String(row.color || '#000000');
-      const modeKey = String(row.mode || ''). toLowerCase();
-      const symbolName = modeSymbolMap. hasOwnProperty(modeKey)
+      const modeKey = String(row.mode || '').toLowerCase();
+      const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
       ? modeSymbolMap[modeKey]
       : 'directions_walk';
 
@@ -818,11 +886,11 @@ if (settingsBtn && settingsPanel) {
       ${escapeHtml(symbolName)}
       </span>
       <div class="ml-seg-line-text">
-      <span class="ml-seg-line-name">${escapeHtml(String(row. line))}</span>
+      <span class="ml-seg-line-name">${escapeHtml(String(row.line))}</span>
       <span class="ml-seg-line-mode">${modeLabel}</span>
       </div>
       </div>
-      <span class="ml-seg-line-cost">${escapeHtml(String(row. costHuman))}</span>
+      <span class="ml-seg-line-cost">${escapeHtml(String(row.costHuman))}</span>
       </div>
       </div>
       </div>`;
@@ -833,12 +901,30 @@ if (settingsBtn && settingsPanel) {
     sidebar.innerHTML = `${summaryHtml}<div class="ml-seg-list">${flowHtml}</div>`;
 
     // Wire up node card click handlers for expand/collapse
-    const nodeCardEls = sidebar. querySelectorAll('.ml-node-card');
+    const nodeCardEls = sidebar.querySelectorAll('.ml-node-card');
     nodeCardEls.forEach(el => {
-      const toggleExpand = () => {
+      const toggleExpand = async () => {
         const isExpanded = el.classList.toggle('expanded');
         el.setAttribute('aria-expanded', isExpanded ?  'true' : 'false');
+
+        // Fetch lines on first expand
+        if (isExpanded && el.dataset.linesLoaded === 'false') {
+          const nodeId = el.dataset.nodeId;
+          const linesContainer = el.querySelector('.ml-node-card-lines');
+
+          if (nodeId && linesContainer) {
+            el.dataset.linesLoaded = 'true'; // Mark as loading/loaded
+
+            try {
+              const lines = await fetchNodeLines(nodeId);
+              renderNodeLines(linesContainer, lines);
+            } catch (err) {
+              linesContainer.innerHTML = '<div class="ml-node-card-lines-error">Failed to load lines</div>';
+            }
+          }
+        }
       };
+
       el.addEventListener('click', toggleExpand);
       el.addEventListener('keydown', (ev) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
@@ -855,12 +941,12 @@ if (settingsBtn && settingsPanel) {
         const idx = Number(el.getAttribute('data-idx'));
         if (isNaN(idx)) return;
         const feat = routeGeo.features[idx];
-        if (! feat) return;
+        if (!feat) return;
         try { fitBoundsForGeoJSON({ type: 'FeatureCollection', features: [feat] }); } catch (e) {}
       };
       el.addEventListener('click', clickHandler);
       el.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter' || ev.key === ' ') { ev. preventDefault(); clickHandler(); }
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); clickHandler(); }
       });
     });
   }
@@ -1002,12 +1088,12 @@ if (settingsBtn && settingsPanel) {
 
   function ensureRailPatterns() {
     try {
-      if (!map. hasImage || !map.hasImage('ml-rail-pattern')) {
+      if (!map.hasImage || !map.hasImage('ml-rail-pattern')) {
         const size = 8;
         const c = document.createElement('canvas');
         c.width = size;
         c.height = size;
-        const ctx = c. getContext('2d');
+        const ctx = c.getContext('2d');
         ctx.clearRect(0, 0, size, size);
         ctx.fillStyle = '#ffffff';
         const sq = 4;
@@ -1020,7 +1106,7 @@ if (settingsBtn && settingsPanel) {
           map.addImage('ml-rail-pattern', {
             width: size,
             height: size,
-            data: imageData. data
+            data: imageData.data
           });
         } catch (e) {
           console.warn('addImage ml-rail-pattern failed', e);
@@ -1029,26 +1115,26 @@ if (settingsBtn && settingsPanel) {
 
       if (!map.hasImage || !map.hasImage('ml-rail-narrow-pattern')) {
         const size2 = 6;
-        const c2 = document. createElement('canvas');
+        const c2 = document.createElement('canvas');
         c2.width = size2;
         c2.height = size2;
         const ctx2 = c2.getContext('2d');
-        ctx2. clearRect(0, 0, size2, size2);
+        ctx2.clearRect(0, 0, size2, size2);
         ctx2.fillStyle = '#ffffff';
         const sq2 = 3;
-        const off2 = Math. floor((size2 - sq2) / 2);
+        const off2 = Math.floor((size2 - sq2) / 2);
         ctx2.fillRect(off2, off2, sq2, sq2);
 
         // Get image data instead of passing canvas directly
         const imageData2 = ctx2.getImageData(0, 0, size2, size2);
         try {
-          map. addImage('ml-rail-narrow-pattern', {
+          map.addImage('ml-rail-narrow-pattern', {
             width: size2,
             height: size2,
             data: imageData2.data
           });
         } catch (e) {
-          console. warn('addImage ml-rail-narrow-pattern failed', e);
+          console.warn('addImage ml-rail-narrow-pattern failed', e);
         }
       }
     } catch (err) {
