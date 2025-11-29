@@ -475,7 +475,34 @@ if (settingsBtn && settingsPanel) {
       updateClearButtonVisibility(role);
   }
 
-  // === Sidebar / route rendering (unchanged from repo) ===
+  // === Sidebar / route rendering (updated for v2 API) ===
+
+  // Helper function to look up node by ID
+  function getNodeById(nodeId) {
+    if (!nodeId) return null;
+    return allFeatures.find(f =>
+    f.properties && String(f.properties. id) === String(nodeId)
+    ) || null;
+  }
+
+  // Helper function to get node name from ID
+  function getNodeName(nodeId) {
+    const node = getNodeById(nodeId);
+    if (node && node.properties) {
+      return node. properties.name || node.properties.id || String(nodeId);
+    }
+    return String(nodeId);
+  }
+
+  // Helper function to get node rank from ID
+  function getNodeRank(nodeId) {
+    const node = getNodeById(nodeId);
+    if (node && node. properties && node.properties.rank !== undefined) {
+      return Number(node.properties. rank);
+    }
+    return null;
+  }
+
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
@@ -486,26 +513,41 @@ if (settingsBtn && settingsPanel) {
 
     const segs = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
+      // API now returns IDs - we'll resolve names later
+      const sourceId = p.source ??  p.src ?? '';
+      const targetId = p.target ??  p.tgt ??  '';
       return {
         idx: i,
-        source: p.source ?? p.src ?? '',
-        target: p.target ?? p.tgt ?? '',
-        line: p.line ?? p.name ?? '',
-        mode: (p.mode ?? '').toLowerCase(),
-                                       cost: p.cost ?? 0,
+        sourceId: sourceId,
+        targetId: targetId,
+        // Resolve names from node lookup
+        source: getNodeName(sourceId),
+                                       target: getNodeName(targetId),
+                                       // Get ranks from node lookup
+                                       sourceRank: getNodeRank(sourceId),
+                                       targetRank: getNodeRank(targetId),
+                                       line: p.line ??  p.name ?? '',
+                                       mode: (p.mode ??  '').toLowerCase(),
+                                       cost: p.cost ??  0,
                                        color: p.ml_sidebar_color || '#000000'
       };
     });
 
-    if (!segs.length) {
+    if (! segs.length) {
       sidebar.innerHTML = '';
-      try { container.classList.remove('ml-search-fixed'); } catch (e) {}
+      try { container.classList. remove('ml-search-fixed'); } catch (e) {}
       return;
     }
 
+    // Build nodes array with IDs and resolved names
+    const nodeIds = [];
     const nodes = [];
-    nodes.push(segs[0].source);
-    segs.forEach(s => nodes.push(s.target));
+    nodeIds.push(segs[0]. sourceId);
+    nodes.push(segs[0]. source);
+    segs.forEach(s => {
+      nodeIds.push(s.targetId);
+      nodes.push(s.target);
+    });
 
     const firstSource = nodes[0] || '';
     const lastTarget = nodes[nodes.length - 1] || '';
@@ -525,18 +567,16 @@ if (settingsBtn && settingsPanel) {
     const steps = [];
     const isSwitchSeg = seg =>
     String(seg.line || '').toLowerCase() === 'switch' &&
-    String(seg.source || '') === String(seg.target || '');
+    String(seg.sourceId || '') === String(seg.targetId || '');
 
-    steps.push({ kind: 'node', label: nodes[0] });
+    steps.push({ kind: 'node', label: nodes[0], nodeId: nodeIds[0] });
 
     for (let i = 0; i < segs.length; i++) {
       const seg = segs[i];
       const costHuman = humanizedCosts[i];
       const switchy = isSwitchSeg(seg);
-      const feat = routeGeo.features[seg.idx];
-      const rank = (feat && feat.properties && feat.properties.rank !== undefined)
-      ? Number(feat.properties.rank)
-      : null;
+      // Get rank from segment's source node (looked up from allFeatures)
+      const rank = seg.sourceRank;
 
       steps.push({
         kind: 'segment',
@@ -548,22 +588,23 @@ if (settingsBtn && settingsPanel) {
         isSwitch: switchy,
         source: seg.source,
         target: seg.target,
-        rank: rank  // Add rank to segment steps
+        sourceId: seg.sourceId,
+        targetId: seg.targetId,
+        rank: rank  // Use looked-up rank
       });
 
       steps.push({
         kind: 'node',
-        label: nodes[i + 1]
+        label: nodes[i + 1],
+        nodeId: nodeIds[i + 1]
       });
     }
-
-    // Replace the rows building section in updateSidebarForRoute:
 
     const rows = [];
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
 
-      if (step.kind === 'node') {
+      if (step. kind === 'node') {
         const next = steps[i + 1];
         const afterNext = steps[i + 2];
 
@@ -575,13 +616,15 @@ if (settingsBtn && settingsPanel) {
           afterNext.kind === 'node' &&
           String(afterNext.label) === String(step.label)
         ) {
-          // This node has a switch - use the switch segment's rank
+          // This node has a switch - get rank from node lookup
+          const nodeRank = getNodeRank(step.nodeId);
           rows.push({
             type: 'node',
             label: step.label,
+            nodeId: step.nodeId,
             switchLine: next.line,
-              switchCostHuman: next.costHuman,
-                rank: next.rank  // Add the rank from the switch segment
+              switchCostHuman: next. costHuman,
+                rank: nodeRank
           });
           i += 2;
           continue;
@@ -590,60 +633,41 @@ if (settingsBtn && settingsPanel) {
         rows.push({
           type: 'node',
           label: step.label,
+          nodeId: step.nodeId,
           switchLine: null,
             switchCostHuman: null,
-              rank: null  // Will be determined from adjacent segment
+              rank: null  // Will be determined from node lookup below
         });
       } else if (step.kind === 'segment') {
-        if (!step.isSwitch) {
+        if (! step.isSwitch) {
           rows.push({
             type: 'segment',
             idx: step.idx,
-            line: step.line,
+            line: step. line,
             mode: step.mode,
             color: step.color,
             costHuman: step.costHuman,
-            rank: step.rank  // Pass through the rank
+            rank: step.rank
           });
         }
       }
     }
+
     const flowRowsHtml = rows.map((row, rowIdx) => {
       if (row.type === 'node') {
         const label = escapeHtml(String(row.label || ''));
 
-        // Determine rank for this node
+        // Determine rank for this node - look it up from allFeatures using nodeId
         let rankLabel = '';
+        let nodeRank = row.rank;
 
-        // Check if this row already has a rank (from a switch)
-        if (row.rank !== null && row.rank !== undefined) {
-          const rank = Number(row.rank);
-          if (!isNaN(rank) && rankLabelMap.hasOwnProperty(rank)) {
-            rankLabel = `<span class="ml-node-rank"><em>${escapeHtml(rankLabelMap[rank])}</em></span>`;
-          }
-        } else if (rowIdx === rows.length - 1 && selected.target) {
-          // Last node - get rank from target search box
-          const rank = Number(selected.target.properties.rank);
-          if (!isNaN(rank) && rankLabelMap.hasOwnProperty(rank)) {
-            rankLabel = `<span class="ml-node-rank"><em>${escapeHtml(rankLabelMap[rank])}</em></span>`;
-          }
-        } else {
-          // All other nodes - get rank from the segment that starts at this node
-          // Count how many segments come AFTER this node position
-          const segmentsAfterThisNode = rows.slice(rowIdx + 1).filter(r => r.type === 'segment').length;
-          const totalSegments = rows.filter(r => r.type === 'segment').length;
-          const segIdxForThisNode = totalSegments - segmentsAfterThisNode;
+        // If rank not already set, look it up
+        if (nodeRank === null || nodeRank === undefined) {
+          nodeRank = getNodeRank(row. nodeId);
+        }
 
-          if (segIdxForThisNode >= 0 && segIdxForThisNode < segs.length) {
-            const seg = segs[segIdxForThisNode];
-            const feat = routeGeo.features[seg.idx];
-            if (feat && feat.properties && feat.properties.rank !== undefined) {
-              const rank = Number(feat.properties.rank);
-              if (!isNaN(rank) && rankLabelMap.hasOwnProperty(rank)) {
-                rankLabel = `<span class="ml-node-rank"><em>${escapeHtml(rankLabelMap[rank])}</em></span>`;
-              }
-            }
-          }
+        if (nodeRank !== null && ! isNaN(nodeRank) && rankLabelMap. hasOwnProperty(nodeRank)) {
+          rankLabel = `<span class="ml-node-rank"><em>${escapeHtml(rankLabelMap[nodeRank])}</em></span>`;
         }
 
         let nodeColor = '';
@@ -670,8 +694,8 @@ if (settingsBtn && settingsPanel) {
 
       // Segment rendering stays the same...
       const segColor = String(row.color || '#000000');
-      const modeKey = String(row.mode || '').toLowerCase();
-      const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
+      const modeKey = String(row.mode || ''). toLowerCase();
+      const symbolName = modeSymbolMap. hasOwnProperty(modeKey)
       ? modeSymbolMap[modeKey]
       : 'directions_walk';
 
