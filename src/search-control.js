@@ -13,7 +13,7 @@ import {
   transportModes,
   normalizeFeatures,
   resolveApiBase,
-  shuffle
+  shuffle,
 } from './helpers.js';
 
 export default async function initSearchControl(map, opts = {}) {
@@ -1441,7 +1441,6 @@ function createContainerHTML() {
   return `
   <div class="search-rows">
   <div class="search-col">
-  <label class="search-label">Starting point</label>
   <div class="ml-input-wrapper">
     <input id="mlSourceBox" class="ml-input" placeholder="Search starting point..." autocomplete="off" />
     <button type="button" class="ml-input-clear" id="mlSourceClear" aria-label="Clear starting point" style="display:none;">×</button>
@@ -1449,7 +1448,6 @@ function createContainerHTML() {
   <div class="suggestions" id="mlSourceSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
   <div class="search-col">
-  <label class="search-label">Destination</label>
   <div class="ml-input-wrapper">
     <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
     <button type="button" class="ml-input-clear" id="mlTargetClear" aria-label="Clear destination" style="display:none;">×</button>
