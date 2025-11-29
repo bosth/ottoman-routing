@@ -28,7 +28,7 @@ function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;',
     '<': '&lt;',
-    '>': '&lt;',
+    '>': '&gt;',
     '"': '&quot;',
     "'": '&#39;'
   }[c]));
@@ -77,7 +77,6 @@ export default async function initSearchControl(map, opts = {}) {
     container.style.top = '12px';
     container.style.left = '12px';
     container.style.zIndex = 1000;
-    container.style.width = '340px'; // narrower sidebar; CSS also sets width, this is a fallback
     container.setAttribute('aria-live', 'polite');
     container.innerHTML = createContainerHTML();
     mapContainer.appendChild(container);
@@ -108,10 +107,10 @@ const targetClearBtn = container.querySelector('#mlTargetClear');
 function updateClearButtonVisibility(role) {
   const st = state[role];
   const clearBtn = role === 'source' ? sourceClearBtn : targetClearBtn;
-  if (! clearBtn) return;
+  if (!clearBtn) return;
 
-  const hasValue = st.input.value. trim(). length > 0 || selected[role] !== null;
-  clearBtn. style.display = hasValue ? 'flex' : 'none';
+  const hasValue = st.input.value.trim().length > 0 || selected[role] !== null;
+  clearBtn.style.display = hasValue ? 'flex' : 'none';
 }
 
 // Wire up clear button handlers
@@ -124,7 +123,7 @@ if (sourceClearBtn) {
     state.source.lastResults = [];
     state.source.suggestionsEl.innerHTML = '';
     updateClearButtonVisibility('source');
-    fetchAndRenderRouteIfReady(). catch(console.error);
+    fetchAndRenderRouteIfReady().catch(console.error);
     // Focus back on input
     setTimeout(() => state.source.input.focus(), 0);
   });
@@ -169,7 +168,7 @@ if (targetClearBtn) {
     toggleBtn.style.left = `${sidebarRight}px`;
   }
 
-  const settingsBtn = container. querySelector('#mlSettingsBtn');
+  const settingsBtn = container.querySelector('#mlSettingsBtn');
 const settingsPanel = container.querySelector('#mlSettingsPanel');
 
 // Add settings state to the state object (modify the existing state declaration around line 319)
@@ -195,7 +194,7 @@ function populateSettingsPanel() {
   grid.className = 'ml-settings-grid';
 
   modes.forEach(mode => {
-    const safeId = String(mode).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, ''). toLowerCase();
+    const safeId = String(mode).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
     const id = `mlMode_${safeId}`;
     const label = document.createElement('label');
     label.className = 'ml-settings-item';
@@ -203,16 +202,16 @@ function populateSettingsPanel() {
 
     const checkbox = document.createElement('input');
     checkbox.type = 'checkbox';
-    checkbox. id = id;
-    checkbox. checked = true;
-    checkbox. dataset.mode = mode;
+    checkbox.id = id;
+    checkbox.checked = true;
+    checkbox.dataset.mode = mode;
     checkbox.className = 'ml-mode-checkbox';
 
     // Initialize settings state
-    state. settings. allowedModes[mode] = true;
+    state.settings.allowedModes[mode] = true;
 
     checkbox.addEventListener('change', () => {
-      state.settings. allowedModes[mode] = checkbox.checked;
+      state.settings.allowedModes[mode] = checkbox.checked;
       // Recalculate route
       fetchAndRenderRouteIfReady().catch(console.error);
     });
@@ -233,13 +232,13 @@ function populateSettingsPanel() {
     <label for="mlYearSlider" class="ml-settings-slider-label">Year</label>
     <div class="ml-settings-slider-wrap">
       <input id="mlYearSlider" type="range" min="1860" max="1918" step="1" value="${state.settings.year}" />
-      <span id="mlYearValue" class="ml-year-value">${state.settings. year}</span>
+      <span id="mlYearValue" class="ml-year-value">${state.settings.year}</span>
     </div>
   `;
 
   // Wire up slider
   const slider = sliderRow.querySelector('#mlYearSlider');
-  const yearValue = sliderRow. querySelector('#mlYearValue');
+  const yearValue = sliderRow.querySelector('#mlYearValue');
   slider.addEventListener('input', () => {
     state.settings.year = Number(slider.value);
     yearValue.textContent = String(state.settings.year);
@@ -249,7 +248,7 @@ function populateSettingsPanel() {
 
   // Append to panel
   settingsPanel.appendChild(grid);
-  settingsPanel. appendChild(sliderRow);
+  settingsPanel.appendChild(sliderRow);
 }
 
 // Settings button click handler
@@ -265,14 +264,14 @@ if (settingsBtn && settingsPanel) {
       settingsBtn.setAttribute('aria-expanded', 'false');
       container.classList.remove('ml-settings-open');
     } else {
-      settingsPanel.style. display = 'block';
+      settingsPanel.style.display = 'block';
       settingsBtn.setAttribute('aria-expanded', 'true');
       container.classList.add('ml-settings-open');
 
       // Populate settings panel if not already done
       if (!settingsPanel.dataset.initialized) {
         populateSettingsPanel();
-        settingsPanel. dataset.initialized = '1';
+        settingsPanel.dataset.initialized = '1';
       }
     }
   });
@@ -515,7 +514,7 @@ const modeSymbolMap = {
   }
 
   function setSelectedFeature(role, feat) {
-  if (! feat) selected[role] = null;
+  if (!feat) selected[role] = null;
   else selected[role] = feat;
 
   const inp = state[role].input;
@@ -547,12 +546,13 @@ const modeSymbolMap = {
     try {
       map.getSource('search-selected').setData(fc);
     } catch (e) {
-      try { if (map.getLayer && map.getLayer('search-selected-circle')) map.removeLayer('search-selected-circle'); } catch (e2) {}
-      try { if (map.getSource && map.getSource('search-selected')) map.removeSource('search-selected'); } catch (e2) {}
+      try {
+        if (map.getLayer && map.getLayer('search-selected-circle')) map.removeLayer('search-selected-circle');
+        if (map.getSource && map.getSource('search-selected')) map.removeSource('search-selected');
+      } catch (e2) {}
       map.addSource('search-selected', { type: 'geojson', data: fc });
     }
       updateClearButtonVisibility(role);
-
   }
 
   async function formatCostMinutes(mins) {
@@ -563,7 +563,7 @@ const modeSymbolMap = {
       return `${m} min`;
     }
     const ms = (Number(mins) || 0) * 60000;
-    return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'], largest: 2 });
+    return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'] });
   }
 
   // === Sidebar / route rendering (unchanged from repo) ===
@@ -613,8 +613,6 @@ const modeSymbolMap = {
     <div class="ml-summary-left">${escapeHtml(String(firstSource))} 🢒 ${escapeHtml(String(lastTarget))}</div>
     <div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div>
     </div>`;
-
-    const modeSymbolMapLocal = modeSymbolMap;
 
     const steps = [];
     const isSwitchSeg = seg =>
@@ -765,8 +763,8 @@ const modeSymbolMap = {
       // Segment rendering stays the same...
       const segColor = String(row.color || '#000000');
       const modeKey = String(row.mode || '').toLowerCase();
-      const symbolName = modeSymbolMapLocal.hasOwnProperty(modeKey)
-      ? modeSymbolMapLocal[modeKey]
+      const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
+      ? modeSymbolMap[modeKey]
       : 'directions_walk';
 
       let connectorModeClass = '';
@@ -998,7 +996,7 @@ const modeSymbolMap = {
 async function fetchAndRenderRouteIfReady() {
   if (!selected.source || !selected.target) {
     try {
-      if (map. getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
+      if (map.getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
       if (map.getSource('search-route-ends')) map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: [] });
     } catch (e) {}
     await updateSidebarForRoute(null);
@@ -1006,7 +1004,7 @@ async function fetchAndRenderRouteIfReady() {
   }
   const sid = selected.source.properties.id;
   const tid = selected.target.properties.id;
-  if (! sid || !tid) return;
+  if (!sid || !tid) return;
   const year = (state.settings && state.settings.year) ?  Number(state.settings.year) : 1914;
   const url = `${apiBase}/v2/route?source=${encodeURIComponent(sid)}&target=${encodeURIComponent(tid)}&year=${encodeURIComponent(year)}`;
 
@@ -1355,9 +1353,9 @@ async function fetchAndRenderRouteIfReady() {
     });
 
 st.input.addEventListener('input', () => {
-  if (st. debounce) clearTimeout(st.debounce);
+  if (st.debounce) clearTimeout(st.debounce);
   st.debounce = setTimeout(() => {
-    const q = st. input.value.trim();
+    const q = st.input.value.trim();
     searchForRole(role, q);
   }, 160);
   updateClearButtonVisibility(role); // ADD THIS LINE
@@ -1424,12 +1422,8 @@ st.input.addEventListener('input', () => {
     }
   });
 
-  // IMPORTANT: click selection now uses your 'nodes-symbol' layer
-  // IMPORTANT: click selection now uses your 'nodes-symbol' layer
   map.on('click', (ev) => {
-    console.log('Map clicked, activeRole:', activeRole);
     if (!activeRole) {
-      console.log('Returning early because activeRole is null');
       return;
     }
 
@@ -1457,7 +1451,6 @@ st.input.addEventListener('input', () => {
   });
 
   if (!nearestFeature) {
-    console.log('No feature found near click');
     // Keep the search box focused and activeRole set so user can try again
     const currentInput = state[activeRole].input;
     setTimeout(() => {
@@ -1472,7 +1465,6 @@ st.input.addEventListener('input', () => {
   // Don't allow selecting the same node twice
   const otherRole = activeRole === 'source' ? 'target' : 'source';
   if (selected[otherRole] && String(selected[otherRole].properties.id) === String(nodeId)) {
-    console.log('Cannot select the same node for both source and target');
     // Keep the search box focused and activeRole set so user can try again
     const currentInput = state[activeRole].input;
     setTimeout(() => {

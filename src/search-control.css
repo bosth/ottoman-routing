@@ -12,6 +12,7 @@
   padding: 8px;
   width: 340px; /* narrower sidebar than the original 420px */
   box-sizing: border-box;
+  pointer-events: auto;
 }
 
 .maplibregl-ctrl-top-left {
@@ -19,10 +20,6 @@
   top: 12px;
   left: 12px;
   z-index: 1000;
-  pointer-events: auto;
-}
-
-.map-search-container {
   pointer-events: auto;
 }
 
@@ -69,7 +66,7 @@
   display: block;
 }
 
-.ml-input-wrapper . ml-input {
+.ml-input-wrapper.ml-input {
   padding-right: 32px; /* Make room for clear button */
   width: 100%;
 }
@@ -101,11 +98,11 @@
   color: #000;
 }
 
-. ml-input-clear:active {
+.ml-input-clear:active {
   background: rgba(0, 0, 0, 0.3);
 }
 
-. ml-input-clear:focus {
+.ml-input-clear:focus {
   outline: 2px solid #1a73e8;
   outline-offset: 2px;
 }
@@ -542,7 +539,7 @@
   margin-top: 8px;
 }
 
-. ml-icon-btn {
+.ml-icon-btn {
   flex: 1;
   padding: 8px;
   font-size: 18px;
@@ -664,7 +661,7 @@
   box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.2);
 }
 
-. ml-year-value {
+.ml-year-value {
   font-size: 14px;
   font-weight: 600;
   color: #222;
