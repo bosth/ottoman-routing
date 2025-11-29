@@ -270,7 +270,7 @@ if (settingsBtn && settingsPanel) {
     if (opts && opts.data && opts.data.features && Array.isArray(opts.data.features)) return opts.data;
     const endpointPath = (opts && opts.endpoint)
     ? (opts.endpoint.startsWith('/') ? opts.endpoint : '/' + opts.endpoint)
-    : '/v2/node';
+    : '/v2/nodes';
     const endpoint = apiBase + endpointPath;
     const res = await fetch(endpoint, { cache: 'no-store' });
     if (!res.ok) throw new Error('Fetch failed: ' + res.status);
@@ -478,6 +478,7 @@ if (settingsBtn && settingsPanel) {
   // === Sidebar / route rendering (updated for v2 API) ===
 
   // Helper function to look up node by ID
+  // Helper function to look up node by ID
   function getNodeById(nodeId) {
     if (!nodeId) return null;
     return allFeatures.find(f =>
@@ -489,7 +490,7 @@ if (settingsBtn && settingsPanel) {
   function getNodeName(nodeId) {
     const node = getNodeById(nodeId);
     if (node && node.properties) {
-      return node. properties.name || node.properties.id || String(nodeId);
+      return node.properties.name || node.properties.id || String(nodeId);
     }
     return String(nodeId);
   }
@@ -503,6 +504,69 @@ if (settingsBtn && settingsPanel) {
     return null;
   }
 
+  // Helper function to get the preferred node name for display
+  // Priority: 1) User-entered name from search box, 2) Name from node with geometry
+  function getPreferredNodeName(nodeId) {
+    if (! nodeId) return String(nodeId);
+
+    // Check if this node matches the selected source or target
+    if (selected. source && String(selected.source. properties.id) === String(nodeId)) {
+      return selected. source.properties.name || selected.source.properties.id || String(nodeId);
+    }
+    if (selected.target && String(selected.target.properties.id) === String(nodeId)) {
+      return selected.target.properties.name || selected. target.properties.id || String(nodeId);
+    }
+
+    // Fall back to finding a node with geometry
+    const nodeWithGeometry = allFeatures.find(f =>
+    f.properties &&
+    String(f.properties. id) === String(nodeId) &&
+    f.geometry &&
+    f. geometry.coordinates &&
+    (f.geometry.type === 'Point' ?
+    (f.geometry.coordinates[0] !== 0 || f. geometry.coordinates[1] !== 0) :
+    true)
+    );
+
+    if (nodeWithGeometry && nodeWithGeometry. properties) {
+      return nodeWithGeometry.properties.name || nodeWithGeometry.properties. id || String(nodeId);
+    }
+
+    // Final fallback: any node with this ID
+    return getNodeName(nodeId);
+  }
+
+  // Helper function to get alternate names for a node ID
+  // Returns an array of unique alternate names (excluding the primary name)
+  function getNodeAlternateNames(nodeId, primaryName) {
+    if (!nodeId) return [];
+
+    const alternates = [];
+    const seen = new Set();
+
+    // Normalize primary name for comparison
+    const primaryNormalized = String(primaryName || '').toLowerCase(). trim();
+    if (primaryNormalized) {
+      seen.add(primaryNormalized);
+    }
+
+    // Find all features with matching ID
+    allFeatures.forEach(f => {
+      if (! f.properties || String(f.properties. id) !== String(nodeId)) return;
+
+      const name = f.properties.name;
+      if (! name) return;
+
+      const nameNormalized = String(name).toLowerCase(). trim();
+      if (nameNormalized && !seen.has(nameNormalized)) {
+        seen.add(nameNormalized);
+        alternates.push(String(name)); // Use original casing
+      }
+    });
+
+    return alternates;
+  }
+
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
     if (!routeGeo || !Array.isArray(routeGeo.features) || routeGeo.features.length === 0) {
@@ -513,16 +577,16 @@ if (settingsBtn && settingsPanel) {
 
     const segs = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
-      // API now returns IDs - we'll resolve names later
-      const sourceId = p.source ??  p.src ?? '';
+      // API now returns IDs - we'll resolve names using preferred logic
+      const sourceId = p.source ??  p.src ??  '';
       const targetId = p.target ??  p.tgt ??  '';
       return {
         idx: i,
         sourceId: sourceId,
         targetId: targetId,
-        // Resolve names from node lookup
-        source: getNodeName(sourceId),
-                                       target: getNodeName(targetId),
+        // Resolve names using preferred name logic
+        source: getPreferredNodeName(sourceId),
+                                       target: getPreferredNodeName(targetId),
                                        // Get ranks from node lookup
                                        sourceRank: getNodeRank(sourceId),
                                        targetRank: getNodeRank(targetId),
@@ -658,7 +722,6 @@ if (settingsBtn && settingsPanel) {
         const label = escapeHtml(String(row.label || ''));
 
         // Determine rank for this node - look it up from allFeatures using nodeId
-        let rankLabel = '';
         let nodeRank = row.rank;
 
         // If rank not already set, look it up
@@ -666,27 +729,56 @@ if (settingsBtn && settingsPanel) {
           nodeRank = getNodeRank(row. nodeId);
         }
 
-        if (nodeRank !== null && ! isNaN(nodeRank) && rankLabelMap. hasOwnProperty(nodeRank)) {
-          rankLabel = `<span class="ml-node-rank"><em>${escapeHtml(rankLabelMap[nodeRank])}</em></span>`;
-        }
+        // Get rank label text (for expanded view)
+        const rankText = (nodeRank !== null && ! isNaN(nodeRank) && rankLabelMap. hasOwnProperty(nodeRank))
+        ? rankLabelMap[nodeRank]
+        : '';
 
-        let nodeColor = '';
+        // Get alternate names for this node
+        const alternateNames = getNodeAlternateNames(row. nodeId, row. label);
+
+        // Determine node circle color
+        let nodeStyle = '';
         if (rowIdx === 0) {
           // First node - green (source)
-          nodeColor = 'style="background-color: #2e7d32; border-color: #2e7d32;"';
+          nodeStyle = 'background-color: #2e7d32; border-color: #2e7d32;';
         } else if (rowIdx === rows.length - 1) {
           // Last node - red (target)
-          nodeColor = 'style="background-color: #d32f2f; border-color: #d32f2f;"';
+          nodeStyle = 'background-color: #d32f2f; border-color: #d32f2f;';
+        }
+
+        // Build rank HTML (hidden by default, shown when expanded)
+        const rankHtml = rankText
+        ? `<div class="ml-node-card-rank">${escapeHtml(rankText)}</div>`
+        : '';
+
+        // Build alternates HTML (hidden by default, shown when expanded)
+        let alternatesHtml = '';
+        if (alternateNames.length > 0) {
+          const alternateItems = alternateNames
+          .map(name => `<div class="ml-node-card-alternate">${escapeHtml(name)}</div>`)
+          .join('');
+          alternatesHtml = `
+          <div class="ml-node-card-alternates">
+          <div class="ml-node-card-alternates-list">
+          ${alternateItems}
+          </div>
+          </div>`;
         }
 
         return `
         <div class="ml-flow-row ml-flow-row-node">
         <div class="ml-flow-left">
-        <span class="ml-node" ${nodeColor}></span>
+        <!-- Circle now rendered inside the card -->
         </div>
         <div class="ml-flow-right ml-flow-right-node">
-        <div class="ml-node-main">
-        <span class="ml-node-label">${label}</span>${rankLabel}
+        <div class="ml-node-card" tabindex="0" role="button" aria-expanded="false" data-node-id="${escapeHtml(String(row.nodeId || ''))}">
+        <span class="ml-node" style="${nodeStyle}"></span>
+        <div class="ml-node-card-content">
+        <div class="ml-node-card-name">${label}</div>
+        ${rankHtml}
+        ${alternatesHtml}
+        </div>
         </div>
         </div>
         </div>`;
@@ -726,11 +818,11 @@ if (settingsBtn && settingsPanel) {
       ${escapeHtml(symbolName)}
       </span>
       <div class="ml-seg-line-text">
-      <span class="ml-seg-line-name">${escapeHtml(String(row.line))}</span>
+      <span class="ml-seg-line-name">${escapeHtml(String(row. line))}</span>
       <span class="ml-seg-line-mode">${modeLabel}</span>
       </div>
       </div>
-      <span class="ml-seg-line-cost">${escapeHtml(String(row.costHuman))}</span>
+      <span class="ml-seg-line-cost">${escapeHtml(String(row. costHuman))}</span>
       </div>
       </div>
       </div>`;
@@ -740,18 +832,35 @@ if (settingsBtn && settingsPanel) {
 
     sidebar.innerHTML = `${summaryHtml}<div class="ml-seg-list">${flowHtml}</div>`;
 
+    // Wire up node card click handlers for expand/collapse
+    const nodeCardEls = sidebar. querySelectorAll('.ml-node-card');
+    nodeCardEls.forEach(el => {
+      const toggleExpand = () => {
+        const isExpanded = el.classList.toggle('expanded');
+        el.setAttribute('aria-expanded', isExpanded ?  'true' : 'false');
+      };
+      el.addEventListener('click', toggleExpand);
+      el.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          toggleExpand();
+        }
+      });
+    });
+
+    // Wire up segment line click handlers (existing code)
     const segLineEls = sidebar.querySelectorAll('.ml-seg-line');
     segLineEls.forEach(el => {
       const clickHandler = () => {
         const idx = Number(el.getAttribute('data-idx'));
         if (isNaN(idx)) return;
         const feat = routeGeo.features[idx];
-        if (!feat) return;
+        if (! feat) return;
         try { fitBoundsForGeoJSON({ type: 'FeatureCollection', features: [feat] }); } catch (e) {}
       };
       el.addEventListener('click', clickHandler);
       el.addEventListener('keydown', (ev) => {
-        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); clickHandler(); }
+        if (ev.key === 'Enter' || ev.key === ' ') { ev. preventDefault(); clickHandler(); }
       });
     });
   }
@@ -893,32 +1002,54 @@ if (settingsBtn && settingsPanel) {
 
   function ensureRailPatterns() {
     try {
-      if (!map.hasImage || !map.hasImage('ml-rail-pattern')) {
+      if (!map. hasImage || !map.hasImage('ml-rail-pattern')) {
         const size = 8;
         const c = document.createElement('canvas');
         c.width = size;
         c.height = size;
-        const ctx = c.getContext('2d');
+        const ctx = c. getContext('2d');
         ctx.clearRect(0, 0, size, size);
         ctx.fillStyle = '#ffffff';
         const sq = 4;
         const off = Math.floor((size - sq) / 2);
         ctx.fillRect(off, off, sq, sq);
-        try { map.addImage('ml-rail-pattern', c, { pixelRatio: 1 }); } catch (e) { console.warn('addImage ml-rail-pattern failed', e); }
+
+        // Get image data instead of passing canvas directly
+        const imageData = ctx.getImageData(0, 0, size, size);
+        try {
+          map.addImage('ml-rail-pattern', {
+            width: size,
+            height: size,
+            data: imageData. data
+          });
+        } catch (e) {
+          console.warn('addImage ml-rail-pattern failed', e);
+        }
       }
 
       if (!map.hasImage || !map.hasImage('ml-rail-narrow-pattern')) {
         const size2 = 6;
-        const c2 = document.createElement('canvas');
+        const c2 = document. createElement('canvas');
         c2.width = size2;
         c2.height = size2;
         const ctx2 = c2.getContext('2d');
-        ctx2.clearRect(0, 0, size2, size2);
+        ctx2. clearRect(0, 0, size2, size2);
         ctx2.fillStyle = '#ffffff';
         const sq2 = 3;
-        const off2 = Math.floor((size2 - sq2) / 2);
+        const off2 = Math. floor((size2 - sq2) / 2);
         ctx2.fillRect(off2, off2, sq2, sq2);
-        try { map.addImage('ml-rail-narrow-pattern', c2, { pixelRatio: 1 }); } catch (e) { console.warn('addImage ml-rail-narrow-pattern failed', e); }
+
+        // Get image data instead of passing canvas directly
+        const imageData2 = ctx2.getImageData(0, 0, size2, size2);
+        try {
+          map. addImage('ml-rail-narrow-pattern', {
+            width: size2,
+            height: size2,
+            data: imageData2.data
+          });
+        } catch (e) {
+          console. warn('addImage ml-rail-narrow-pattern failed', e);
+        }
       }
     } catch (err) {
       console.warn('Rail pattern creation failed:', err);

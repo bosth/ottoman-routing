@@ -76,14 +76,14 @@ function initMap() {
 
     let geojson = null;
     try {
-      const res = await fetch(apiBase + '/v2/node', { cache: 'no-store' });
+      const res = await fetch(apiBase + '/v2/nodes', { cache: 'no-store' });
       if (res.ok) {
         geojson = await res.json();
       } else {
-        console.warn('Failed to fetch /v2/node:', res.status, res.statusText);
+        console.warn('Failed to fetch /v2/nodes:', res.status, res.statusText);
       }
     } catch (err) {
-      console.warn('Could not fetch /v2/node at startup:', err);
+      console.warn('Could not fetch /v2/nodes at startup:', err);
     }
 
     // If nodes loaded, add your new base node styling
