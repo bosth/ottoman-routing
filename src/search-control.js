@@ -5,62 +5,16 @@
 // Now also adds a collapsible sidebar with a correctly positioned toggle button.
 
 import Fuse from 'fuse.js';
-
-function loadScript(src) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = src;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = (e) => reject(e);
-    document.head.appendChild(s);
-  });
-}
-
-function ensureHumanize() {
-  if (typeof window.humanizeDuration === 'function') return Promise.resolve();
-  return loadScript('https://cdn.jsdelivr.net/npm/humanize-duration@3.27.0').catch(err => {
-    console.warn('Failed to load humanize-duration from CDN', err);
-  });
-}
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;'
-  }[c]));
-}
-
-function resolveApiBase(opts) {
-  if (opts && opts.apiBase) return String(opts.apiBase).replace(/\/$/, '');
-  if (typeof window !== 'undefined' && window.__API_BASE__) return String(window.__API_BASE__).replace(/\/$/, '');
-  try {
-    const host = window.location.hostname;
-    if (host === 'localhost' || host === '127.0.0.1') return 'http://localhost:8080';
-  } catch (e) {}
-  return 'https://geo.jaxartes.net';
-}
-
-function normalizeFeatures(features) {
-  return (features || []).map(f => {
-    const p = f.properties || {};
-    const rawId = (f && f.id !== undefined && f.id !== null) ? f.id : (p.id ?? p.ID ?? '');
-    const fid = (rawId === null || rawId === undefined) ? '' : String(rawId);
-    return {
-      type: 'Feature',
-      geometry: f.geometry,
-      properties: {
-        id: fid,
-        name: p.name ?? p.title ?? '',
-        rank: (p.rank !== undefined) ? Number(p.rank) : 9999,
-                              ...p
-      }
-    };
-  });
-}
+import {
+  escapeHtml,
+  modeSymbolMap,
+  rankLabelMap,
+  formatCostMinutes,
+  transportModes,
+  normalizeFeatures,
+  resolveApiBase,
+  shuffle
+} from './helpers.js';
 
 export default async function initSearchControl(map, opts = {}) {
   const apiBase = resolveApiBase(opts);
@@ -183,17 +137,11 @@ const state = {
 function populateSettingsPanel() {
   if (!settingsPanel) return;
 
-  const modes = [
-    'walk', 'road', 'chaussee', 'connection', 'transfer', 'switch',
-    'horse tramway', 'electric tramway', 'steam tramway', 'tramway', 'tram',
-    'railway', 'narrow-gauge railway', 'ferry', 'ship', 'metro', 'funicular'
-  ];
-
   // Create grid container
   const grid = document.createElement('div');
   grid.className = 'ml-settings-grid';
 
-  modes.forEach(mode => {
+  transportModes.forEach(mode => {
     const safeId = String(mode).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
     const id = `mlMode_${safeId}`;
     const label = document.createElement('label');
@@ -408,34 +356,6 @@ if (settingsBtn && settingsPanel) {
     }
   }
 
-  const rankLabelMap = {
-    9: 'vilâyet merkezi',
-    8: 'sancak merkezi',
-    7: 'kazâ merkezi',
-    6: 'nâhiye merkezi',
-    5: 'köy',
-    4: 'station',
-    3: 'dock',
-    2: 'stop'
-  };
-
-const modeSymbolMap = {
-  walk: 'directions_walk',
-  road: 'directions_walk',
-  chaussee: 'directions_walk',
-  connection: 'subway_walk',
-  transfer: 'subway_walk',
-  switch: 'subway_walk',
-  'horse tramway': 'cable_car',
-  'electric tramway': 'tram',
-  railway: 'train',
-  'narrow-gauge railway': 'directions_railway_2',
-  'steam tramway': 'directions_railway_2',  // ADD THIS LINE
-  ferry: 'directions_boat',
-  ship: 'anchor',
-  metro: 'funicular'
-};
-
   function renderSuggestionsForRole(role) {
     const st = state[role];
     const suggestionsEl = st.suggestionsEl;
@@ -555,17 +475,6 @@ const modeSymbolMap = {
       updateClearButtonVisibility(role);
   }
 
-  async function formatCostMinutes(mins) {
-    await ensureHumanize();
-    const md = (typeof window.humanizeDuration === 'function') ? window.humanizeDuration : null;
-    if (!md) {
-      const m = Number(mins) || 0;
-      return `${m} min`;
-    }
-    const ms = (Number(mins) || 0) * 60000;
-    return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'] });
-  }
-
   // === Sidebar / route rendering (unchanged from repo) ===
   async function updateSidebarForRoute(routeGeo) {
     if (!sidebar) return;
@@ -574,7 +483,6 @@ const modeSymbolMap = {
       try { container.classList.remove('ml-search-fixed'); } catch (e) {}
       return;
     }
-    await ensureHumanize();
 
     const segs = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
@@ -1024,13 +932,7 @@ async function fetchAndRenderRouteIfReady() {
           if (!tramKeys.includes(key)) tramKeys.push(key);
         }
       });
-      function shuffle(arr) {
-        for (let i = arr.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [arr[i], arr[j]] = [arr[j], arr[i]];
-        }
-        return arr;
-      }
+
       const shuffled = shuffle(palette.slice());
       const lineColorMap = {};
       tramKeys.forEach((k, i) => { lineColorMap[k] = shuffled[i % shuffled.length]; });
