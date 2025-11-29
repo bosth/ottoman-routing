@@ -10,10 +10,11 @@ import {
   modeSymbolMap,
   rankLabelMap,
   formatCostMinutes,
-  transportModes,
-  normalizeFeatures,
-  resolveApiBase,
-  shuffle,
+    transportModes,
+    normalizeFeatures,
+    resolveApiBase,
+    shuffle,
+    modeIntToName,
 } from './helpers.js';
 
 export default async function initSearchControl(map, opts = {}) {
@@ -638,22 +639,16 @@ if (settingsBtn && settingsPanel) {
 
     const segs = routeGeo.features.map((f, i) => {
       const p = f.properties || {};
-      // API now returns IDs - we'll resolve names using preferred logic
-      const sourceId = p.source ??  p.src ??  '';
-      const targetId = p.target ??  p.tgt ??  '';
       return {
         idx: i,
-        sourceId: sourceId,
-        targetId: targetId,
-        // Resolve names using preferred name logic
-        source: getPreferredNodeName(sourceId),
-                                       target: getPreferredNodeName(targetId),
-                                       // Get ranks from node lookup
-                                       sourceRank: getNodeRank(sourceId),
-                                       targetRank: getNodeRank(targetId),
-                                       line: p.line ??  p.name ?? '',
-                                       mode: (p.mode ??  '').toLowerCase(),
-                                       cost: p.cost ??  0,
+        sourceId: p.source ?? p.src ?? '',
+        targetId: p.target ?? p.tgt ?? '',
+        source: getPreferredNodeName(p.source ?? p.src ?? ''),
+                                       target: getPreferredNodeName(p.target ?? p.tgt ?? ''),
+                                       line: p.line ?? p.name ?? '',
+                                       modeInt: Number(p.mode),
+                                       mode: modeIntToName[Number(p.mode)] ?? '',
+                                       cost: p.cost ?? 0,
                                        color: p.ml_sidebar_color || '#000000'
       };
     });
@@ -726,56 +721,43 @@ if (settingsBtn && settingsPanel) {
     }
 
     const rows = [];
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      const prevSeg = segs[i - 1];
 
-      if (step.kind === 'node') {
-        const next = steps[i + 1];
-        const afterNext = steps[i + 2];
-
-        if (
-          next &&
-          next.kind === 'segment' &&
-          next.isSwitch === true &&
-          afterNext &&
-          afterNext.kind === 'node' &&
-          String(afterNext.label) === String(step.label)
-        ) {
-          // This node has a switch - get rank from node lookup
-          const nodeRank = getNodeRank(step.nodeId);
-          rows.push({
-            type: 'node',
-            label: step.label,
-            nodeId: step.nodeId,
-            switchLine: next.line,
-              switchCostHuman: next.costHuman,
-                rank: nodeRank
-          });
-          i += 2;
-          continue;
-        }
-
+      // For the first segment, start with its source
+      if (i === 0) {
         rows.push({
           type: 'node',
-          label: step.label,
-          nodeId: step.nodeId,
-          switchLine: null,
-            switchCostHuman: null,
-              rank: null  // Will be determined from node lookup below
+          label: seg.source,
+          nodeId: seg.sourceId,
+          rank: seg.sourceRank
         });
-      } else if (step.kind === 'segment') {
-        if (! step.isSwitch) {
-          rows.push({
-            type: 'segment',
-            idx: step.idx,
-            line: step.line,
-            mode: step.mode,
-            color: step.color,
-            costHuman: step.costHuman,
-            rank: step.rank
-          });
-        }
       }
+
+      // Only add segment if it is NOT a switch (mode 10) AND NOT repeat source/target
+      const isSwitch =
+      Number(seg.modeInt) === 10 || seg.mode === "switch";
+      const isRepeat = seg.sourceId === seg.targetId;
+      if (!(isSwitch && isRepeat)) {
+        rows.push({
+          type: 'segment',
+          idx: seg.idx,
+          line: seg.line,
+          mode: seg.mode,
+          color: seg.color,
+          costHuman: humanizedCosts[i],
+          rank: seg.rank
+        });
+        // Only add node if it's the target (and not immediately after a switch)
+        rows.push({
+          type: 'node',
+          label: seg.target,
+          nodeId: seg.targetId,
+          rank: seg.targetRank
+        });
+      }
+      // else: skip switches (do NOT add segment, do NOT add node—the target will appear in next group)
     }
 
     const flowRowsHtml = rows.map((row, rowIdx) => {
@@ -852,22 +834,18 @@ if (settingsBtn && settingsPanel) {
         </div>`;
       }
 
-      // Segment rendering stays the same...
       const segColor = String(row.color || '#000000');
-      const modeKey = String(row.mode || '').toLowerCase();
-      const symbolName = modeSymbolMap.hasOwnProperty(modeKey)
-      ? modeSymbolMap[modeKey]
-      : 'directions_walk';
+      const modeName = row.mode; // Already canonical string
+      const symbolName = modeSymbolMap[modeName] || 'directions_walk';
 
+      // For connector style
       let connectorModeClass = '';
-      if (modeKey === 'railway') connectorModeClass = 'railway';
-      else if (modeKey === 'narrow-gauge railway') connectorModeClass = 'railway-narrow';
-      else if (modeKey === 'ferry' || modeKey === 'ship') connectorModeClass = modeKey;
-      else if (modeKey === 'connection' || modeKey === 'transfer') connectorModeClass = modeKey;
+      if (modeName === 'railway') connectorModeClass = 'railway';
+      else if (modeName === 'narrow-gauge railway') connectorModeClass = 'railway-narrow';
+      else if (modeName === 'ferry' || modeName === 'ship') connectorModeClass = modeName;
+      else if (modeName === 'connection' || modeName === 'transfer') connectorModeClass = modeName;
 
-      const modeLabel = (modeKey === 'transfer')
-      ? ''
-      : escapeHtml(modeKey || '');
+      const modeLabel = (modeName === 'transfer') ? '' : escapeHtml(modeName || '');
 
       return `
       <div class="ml-flow-row ml-flow-row-seg">
@@ -893,7 +871,8 @@ if (settingsBtn && settingsPanel) {
       <span class="ml-seg-line-cost">${escapeHtml(String(row.costHuman))}</span>
       </div>
       </div>
-      </div>`;
+      </div>
+      `;
     }).join('');
 
     const flowHtml = `<div class="ml-flow">${flowRowsHtml}</div>`;
@@ -1179,25 +1158,17 @@ async function fetchAndRenderRouteIfReady() {
       tramKeys.forEach((k, i) => { lineColorMap[k] = shuffled[i % shuffled.length]; });
       routeGeo.features.forEach((f, idx) => {
         const props = f.properties || {};
-        const mode = String((props.mode || '')).toLowerCase();
-        props.ml_mode_lower = mode;
-        if (mode.includes('tramway') || mode.includes('metro')) {
-          const key = String(props.line || props.id || `__line_${idx}`);
-          props.ml_color = lineColorMap[key] || shuffled[idx % shuffled.length];
+        // Map integer to canonical mode string
+        const modeInt = Number(props.mode);
+        const modeName = modeIntToName[modeInt] || '';
+        props.ml_mode_int = modeInt;
+        props.ml_mode_lower = modeName; // For map styling and sidebar
+        let apiColour = props.colour;
+        if (!apiColour || /^\s*$/.test(apiColour)) {
+          apiColour = '#000000';
         }
-
-        let sidebarColor;
-        if (mode === 'railway' || mode === 'narrow-gauge railway') {
-          sidebarColor = '#000000';
-        } else if (mode === 'ferry' || mode === 'ship') {
-          sidebarColor = '#1a73e8';
-        } else if (props.ml_color) {
-          sidebarColor = props.ml_color;
-        } else {
-          sidebarColor = '#000000';
-        }
-        props.ml_sidebar_color = sidebarColor;
-
+        props.ml_color = apiColour;
+        props.ml_sidebar_color = apiColour;
         f.properties = props;
       });
 
@@ -1305,31 +1276,13 @@ async function fetchAndRenderRouteIfReady() {
           source: 'search-route',
           layout: { 'line-join': 'round', 'line-cap': 'round' },
           paint: {
-            'line-color': [
-              'coalesce',
-              [
-                'match',
-                ['get', 'ml_mode_lower'],
-                'connection', '#000000',
-                'transfer', '#000000',
-                'railway', '#000000',
-                'narrow-gauge railway', '#000000',
-                'road', '#ffffff',
-                'chaussee', '#ffffff',
-                'ferry', '#1a73e8',
-                'ship', '#1a73e8',
-                ['get', 'ml_color']
-              ],
-              '#1a73e8'
-            ],
+            'line-color': ['coalesce', ['get', 'ml_color'], '#000000'],
             'line-width': [
               'case',
               ['==', ['get', 'ml_mode_lower'], 'narrow-gauge railway'], 4.5,
               ['==', ['get', 'ml_mode_lower'], 'railway'], 6,
-              // slightly thinner than outline so border shows
               ['in', ['get', 'ml_mode_lower'], ['literal', ['road', 'chaussee']]], 4,
               ['in', ['get', 'ml_mode_lower'], ['literal', ['connection', 'transfer']]], 2,
-              ['has', 'ml_color'], 4,
               4
             ],
             'line-dasharray': [

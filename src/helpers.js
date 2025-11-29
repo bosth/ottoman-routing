@@ -1,10 +1,25 @@
+// helpers.js
 import humanizeDuration from 'humanize-duration';
 
-export const transportModes = [
-    'walk', 'road', 'chaussee', 'connection', 'transfer', 'switch',
-'horse tramway', 'electric tramway', 'steam tramway', 'tramway', 'tram',
-'railway', 'narrow-gauge railway', 'ferry', 'ship', 'metro', 'funicular'
-];
+// Integer mode value to named mode mapping from API
+export const modeIntToName = {
+    1: 'road',
+    2: 'chaussee',
+    3: 'ferry',
+    4: 'metro',
+    5: 'horse tramway',
+    6: 'ship',
+    7: 'electric tramway',
+    8: 'railway',
+    9: 'transfer',
+    10: 'switch',
+    11: 'connection',
+    12: 'steam tramway',
+    13: 'narrow-gauge railway'
+};
+
+// Array of named modes, generated automatically from above
+export const transportModes = Object.values(modeIntToName);
 
 // escapeHtml utility function
 export function escapeHtml(s) {
@@ -19,20 +34,19 @@ export function escapeHtml(s) {
 
 // modeSymbolMap contains mapping between mode and icon representation
 export const modeSymbolMap = {
-    walk: 'directions_walk',
     road: 'directions_walk',
     chaussee: 'directions_walk',
-    connection: 'subway_walk',
+    ferry: 'directions_boat',
+    metro: 'funicular',
+    'horse tramway': 'cable_car',
+    ship: 'anchor',
+    'electric tramway': 'tram',
+    railway: 'train',
     transfer: 'subway_walk',
     switch: 'subway_walk',
-        'horse tramway': 'cable_car',
-        'electric tramway': 'tram',
-        railway: 'train',
-        'narrow-gauge railway': 'directions_railway_2',
+        connection: 'subway_walk',
         'steam tramway': 'directions_railway_2',
-        ferry: 'directions_boat',
-        ship: 'anchor',
-        metro: 'funicular',
+        'narrow-gauge railway': 'directions_railway_2'
 };
 
 // rankLabelMap contains mapping between rank and its textual representation
@@ -57,7 +71,6 @@ export function formatCostMinutes(mins) {
     const ms = (Number(mins) || 0) * 60000;
     return md(ms, { largest: 2, round: true, units: ['d', 'h', 'm'] });
 }
-
 
 export function normalizeFeatures(features) {
     return (features || []).map(f => {
