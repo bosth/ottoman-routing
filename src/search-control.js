@@ -55,49 +55,49 @@ export default async function initSearchControl(map, opts = {}) {
   mapContainer.appendChild(toggleBtn);
 
   // Get clear buttons
-const sourceClearBtn = container.querySelector('#mlSourceClear');
-const targetClearBtn = container.querySelector('#mlTargetClear');
+  const sourceClearBtn = container.querySelector('#mlSourceClear');
+  const targetClearBtn = container.querySelector('#mlTargetClear');
 
-// Function to show/hide clear buttons based on input value
-function updateClearButtonVisibility(role) {
-  const st = state[role];
-  const clearBtn = role === 'source' ? sourceClearBtn : targetClearBtn;
-  if (!clearBtn) return;
+  // Function to show/hide clear buttons based on input value
+  function updateClearButtonVisibility(role) {
+    const st = state[role];
+    const clearBtn = role === 'source' ? sourceClearBtn : targetClearBtn;
+    if (!clearBtn) return;
 
-  const hasValue = st.input.value.trim().length > 0 || selected[role] !== null;
-  clearBtn.style.display = hasValue ? 'flex' : 'none';
-}
+    const hasValue = st.input.value.trim().length > 0 || selected[role] !== null;
+    clearBtn.style.display = hasValue ? 'flex' : 'none';
+  }
 
-// Wire up clear button handlers
-if (sourceClearBtn) {
-  sourceClearBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSelectedFeature('source', null);
-    state.source.input.value = '';
-    state.source.lastResults = [];
-    state.source.suggestionsEl.innerHTML = '';
-    updateClearButtonVisibility('source');
-    fetchAndRenderRouteIfReady().catch(console.error);
-    // Focus back on input
-    setTimeout(() => state.source.input.focus(), 0);
-  });
-}
+  // Wire up clear button handlers
+  if (sourceClearBtn) {
+    sourceClearBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectedFeature('source', null);
+      state.source.input.value = '';
+      state.source.lastResults = [];
+      state.source.suggestionsEl.innerHTML = '';
+      updateClearButtonVisibility('source');
+      fetchAndRenderRouteIfReady().catch(console.error);
+      // Focus back on input
+      setTimeout(() => state.source.input.focus(), 0);
+    });
+  }
 
-if (targetClearBtn) {
-  targetClearBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSelectedFeature('target', null);
-    state.target.input.value = '';
-    state.target.lastResults = [];
-    state.target.suggestionsEl.innerHTML = '';
-    updateClearButtonVisibility('target');
-    fetchAndRenderRouteIfReady().catch(console.error);
-    // Focus back on input
-    setTimeout(() => state.target.input.focus(), 0);
-  });
-}
+  if (targetClearBtn) {
+    targetClearBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setSelectedFeature('target', null);
+      state.target.input.value = '';
+      state.target.lastResults = [];
+      state.target.suggestionsEl.innerHTML = '';
+      updateClearButtonVisibility('target');
+      fetchAndRenderRouteIfReady().catch(console.error);
+      // Focus back on input
+      setTimeout(() => state.target.input.focus(), 0);
+    });
+  }
 
   function positionToggleExpanded() {
     // If collapsed, do not override fixed positioning
@@ -124,170 +124,170 @@ if (targetClearBtn) {
   }
 
   const settingsBtn = container.querySelector('#mlSettingsBtn');
-const settingsPanel = container.querySelector('#mlSettingsPanel');
+  const settingsPanel = container.querySelector('#mlSettingsPanel');
 
-// Add settings state to the state object (modify the existing state declaration around line 319)
-const selected = { source: null, target: null };
-const state = {
-  source: { input: sourceBox, suggestionsEl: sourceSug, lastResults: [], activeIndex: -1, debounce: null },
-  target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null },
-  settings: { year: 1914, allowedModes: {} }
-};
+  // Add settings state to the state object (modify the existing state declaration around line 319)
+  const selected = { source: null, target: null };
+  const state = {
+    source: { input: sourceBox, suggestionsEl: sourceSug, lastResults: [], activeIndex: -1, debounce: null, selectableIndices: [] },
+    target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null, selectableIndices: [] },
+    settings: { year: 1914, allowedModes: {} }
+  };
 
-// Cache for node lines data to avoid repeated fetches
-const nodeLinesCache = new Map();
+  // Cache for node lines data to avoid repeated fetches
+  const nodeLinesCache = new Map();
 
-// Helper function to fetch lines for a node
-async function fetchNodeLines(nodeId) {
-  if (! nodeId) return null;
+  // Helper function to fetch lines for a node
+  async function fetchNodeLines(nodeId) {
+    if (! nodeId) return null;
 
-  // Check cache first
-  if (nodeLinesCache.has(String(nodeId))) {
-    return nodeLinesCache.get(String(nodeId));
+    // Check cache first
+    if (nodeLinesCache.has(String(nodeId))) {
+      return nodeLinesCache.get(String(nodeId));
+    }
+
+    try {
+      const year = (state.settings && state.settings.year) ?  Number(state.settings.year) : 1914;
+      const url = `${apiBase}/v2/nodes/${encodeURIComponent(nodeId)}?year=${encodeURIComponent(year)}`;
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('Fetch failed: ' + res.status);
+      const data = await res.json();
+
+      // The response is { json_agg: [...] } or similar
+      const lines = Array.isArray(data?.json_agg) ? data.json_agg :
+      Array.isArray(data) ? data : [];
+
+      // Cache the result
+      nodeLinesCache.set(String(nodeId), lines);
+      return lines;
+    } catch (err) {
+      console.warn('Failed to fetch lines for node', nodeId, err);
+      return null;
+    }
   }
 
-  try {
-    const year = (state.settings && state.settings.year) ?  Number(state.settings.year) : 1914;
-    const url = `${apiBase}/v2/nodes/${encodeURIComponent(nodeId)}?year=${encodeURIComponent(year)}`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error('Fetch failed: ' + res.status);
-    const data = await res.json();
+  // Helper function to render lines into a card's lines container
+  function renderNodeLines(linesContainer, lines) {
+    if (!linesContainer) return;
 
-    // The response is { json_agg: [...] } or similar
-    const lines = Array.isArray(data?.json_agg) ? data.json_agg :
-    Array.isArray(data) ? data : [];
+    if (! lines || lines.length === 0) {
+      linesContainer.innerHTML = '<div class="ml-node-card-lines-error">No lines found</div>';
+      return;
+    }
 
-    // Cache the result
-    nodeLinesCache.set(String(nodeId), lines);
-    return lines;
-  } catch (err) {
-    console.warn('Failed to fetch lines for node', nodeId, err);
-    return null;
-  }
-}
+    const listHtml = lines.map(line => {
+      const name = escapeHtml(String(line.name || 'Unknown'));
+      const colour = line.colour || '#000000';
+      const mode = escapeHtml(String(line.mode || ''));
 
-// Helper function to render lines into a card's lines container
-function renderNodeLines(linesContainer, lines) {
-  if (!linesContainer) return;
+      return `
+      <div class="ml-node-card-line">
+      <div class="ml-node-card-line-name" style="color: ${escapeHtml(colour)}">${name}</div>
+      ${mode ? `<div class="ml-node-card-line-mode">${mode}</div>` : ''}
+      </div>
+      `;
+    }).join('');
 
-  if (! lines || lines.length === 0) {
-    linesContainer.innerHTML = '<div class="ml-node-card-lines-error">No lines found</div>';
-    return;
-  }
-
-  const listHtml = lines.map(line => {
-    const name = escapeHtml(String(line.name || 'Unknown'));
-    const colour = line.colour || '#000000';
-    const mode = escapeHtml(String(line.mode || ''));
-
-    return `
-    <div class="ml-node-card-line">
-    <div class="ml-node-card-line-name" style="color: ${escapeHtml(colour)}">${name}</div>
-    ${mode ? `<div class="ml-node-card-line-mode">${mode}</div>` : ''}
-    </div>
+    linesContainer.innerHTML = `
+    <div class="ml-node-card-lines-label">Lines</div>
+    <div class="ml-node-card-lines-list">${listHtml}</div>
     `;
-  }).join('');
+  }
 
-  linesContainer.innerHTML = `
-  <div class="ml-node-card-lines-label">Lines</div>
-  <div class="ml-node-card-lines-list">${listHtml}</div>
-  `;
-}
+  // Settings button handler and population function
+  function populateSettingsPanel() {
+    if (!settingsPanel) return;
 
-// Settings button handler and population function
-function populateSettingsPanel() {
-  if (!settingsPanel) return;
+    // Create grid container
+    const grid = document.createElement('div');
+    grid.className = 'ml-settings-grid';
 
-  // Create grid container
-  const grid = document.createElement('div');
-  grid.className = 'ml-settings-grid';
+    transportModes.forEach(mode => {
+      const safeId = String(mode).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
+      const id = `mlMode_${safeId}`;
+      const label = document.createElement('label');
+      label.className = 'ml-settings-item';
+      label.htmlFor = id;
 
-  transportModes.forEach(mode => {
-    const safeId = String(mode).replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '').toLowerCase();
-    const id = `mlMode_${safeId}`;
-    const label = document.createElement('label');
-    label.className = 'ml-settings-item';
-    label.htmlFor = id;
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.id = id;
+      checkbox.checked = true;
+      checkbox.dataset.mode = mode;
+      checkbox.className = 'ml-mode-checkbox';
 
-    const checkbox = document.createElement('input');
-    checkbox.type = 'checkbox';
-    checkbox.id = id;
-    checkbox.checked = true;
-    checkbox.dataset.mode = mode;
-    checkbox.className = 'ml-mode-checkbox';
+      // Initialize settings state
+      state.settings.allowedModes[mode] = true;
 
-    // Initialize settings state
-    state.settings.allowedModes[mode] = true;
+      checkbox.addEventListener('change', () => {
+        state.settings.allowedModes[mode] = checkbox.checked;
+        // Recalculate route
+        fetchAndRenderRouteIfReady().catch(console.error);
+      });
 
-    checkbox.addEventListener('change', () => {
-      state.settings.allowedModes[mode] = checkbox.checked;
-      // Recalculate route
-      fetchAndRenderRouteIfReady().catch(console.error);
+      const span = document.createElement('span');
+      span.className = 'ml-settings-item-label';
+      span.textContent = mode;
+
+      label.appendChild(checkbox);
+      label.appendChild(span);
+      grid.appendChild(label);
     });
 
-    const span = document.createElement('span');
-    span.className = 'ml-settings-item-label';
-    span.textContent = mode;
-
-    label.appendChild(checkbox);
-    label.appendChild(span);
-    grid.appendChild(label);
-  });
-
-  // Year slider row
-  const sliderRow = document.createElement('div');
-  sliderRow.className = 'ml-settings-slider-row';
-  sliderRow.innerHTML = `
+    // Year slider row
+    const sliderRow = document.createElement('div');
+    sliderRow.className = 'ml-settings-slider-row';
+    sliderRow.innerHTML = `
     <label for="mlYearSlider" class="ml-settings-slider-label">Year</label>
     <div class="ml-settings-slider-wrap">
-      <input id="mlYearSlider" type="range" min="1860" max="1918" step="1" value="${state.settings.year}" />
-      <span id="mlYearValue" class="ml-year-value">${state.settings.year}</span>
+    <input id="mlYearSlider" type="range" min="1860" max="1918" step="1" value="${state.settings.year}" />
+    <span id="mlYearValue" class="ml-year-value">${state.settings.year}</span>
     </div>
-  `;
+    `;
 
-  // Wire up slider
-  const slider = sliderRow.querySelector('#mlYearSlider');
-  const yearValue = sliderRow.querySelector('#mlYearValue');
-  slider.addEventListener('input', () => {
-    state.settings.year = Number(slider.value);
-    yearValue.textContent = String(state.settings.year);
-    // Recalculate route
-    fetchAndRenderRouteIfReady().catch(console.error);
-    nodeLinesCache.clear(); // clear cache since year affects it
-  });
+    // Wire up slider
+    const slider = sliderRow.querySelector('#mlYearSlider');
+    const yearValue = sliderRow.querySelector('#mlYearValue');
+    slider.addEventListener('input', () => {
+      state.settings.year = Number(slider.value);
+      yearValue.textContent = String(state.settings.year);
+      // Recalculate route
+      fetchAndRenderRouteIfReady().catch(console.error);
+      nodeLinesCache.clear(); // clear cache since year affects it
+    });
 
-  // Append to panel
-  settingsPanel.appendChild(grid);
-  settingsPanel.appendChild(sliderRow);
-}
+    // Append to panel
+    settingsPanel.appendChild(grid);
+    settingsPanel.appendChild(sliderRow);
+  }
 
-// Settings button click handler
-if (settingsBtn && settingsPanel) {
-  settingsBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // Settings button click handler
+  if (settingsBtn && settingsPanel) {
+    settingsBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    const isOpen = settingsPanel.style.display !== 'none';
+      const isOpen = settingsPanel.style.display !== 'none';
 
-    if (isOpen) {
-      settingsPanel.style.display = 'none';
-      settingsBtn.setAttribute('aria-expanded', 'false');
-      container.classList.remove('ml-settings-open');
-    } else {
-      settingsPanel.style.display = 'block';
-      settingsBtn.setAttribute('aria-expanded', 'true');
-      container.classList.add('ml-settings-open');
+      if (isOpen) {
+        settingsPanel.style.display = 'none';
+        settingsBtn.setAttribute('aria-expanded', 'false');
+        container.classList.remove('ml-settings-open');
+      } else {
+        settingsPanel.style.display = 'block';
+        settingsBtn.setAttribute('aria-expanded', 'true');
+        container.classList.add('ml-settings-open');
 
-      // Populate settings panel if not already done
-      if (!settingsPanel.dataset.initialized) {
-        populateSettingsPanel();
-        settingsPanel.dataset.initialized = '1';
+        // Populate settings panel if not already done
+        if (!settingsPanel.dataset.initialized) {
+          populateSettingsPanel();
+          settingsPanel.dataset.initialized = '1';
+        }
       }
-    }
-  });
-} else {
-  console.warn('Settings button or panel not found', { settingsBtn, settingsPanel });
-}
+    });
+  } else {
+    console.warn('Settings button or panel not found', { settingsBtn, settingsPanel });
+  }
 
   // Initial expanded position
   requestAnimationFrame(positionToggleExpanded);
@@ -423,6 +423,8 @@ if (settingsBtn && settingsPanel) {
     const suggestionsEl = st.suggestionsEl;
     suggestionsEl.innerHTML = '';
     st.activeIndex = -1;
+    st.selectableIndices = [];
+
     const results = st.lastResults;
     if (!results || !results.length) {
       suggestionsEl.removeAttribute('aria-activedescendant');
@@ -430,26 +432,70 @@ if (settingsBtn && settingsPanel) {
       return;
     }
 
-    results.slice(0, maxSuggestions).forEach((r, idx) => {
+    // Group results by display name (case-insensitive) to avoid repeating the same name.
+    // For each name group we'll show the name once (bold) and then the distinct rank labels beneath it.
+    const groups = new Map(); // key -> { displayName, entries: [ { idx, item } ] }
+    results.forEach((r, idx) => {
       const item = r.item || r;
-      const rank = (item.properties && item.properties.rank) ? Number(item.properties.rank) : null;
-      const showLabel = (rank !== null && rankLabelMap.hasOwnProperty(rank)) ? rankLabelMap[rank] : '';
-      const row = document.createElement('div');
-      row.className = 'suggestion';
-      row.dataset.index = idx;
-      row.id = `ml-${role}-suggestion-${idx}`;
-      row.setAttribute('role', 'option');
-      row.setAttribute('aria-selected', 'false');
-      row.innerHTML = `
-      <div style="flex:1">
-      <strong>${escapeHtml(item.properties.name || item.properties.id || '')}</strong>
-      <div style="font-size:12px;color:#666">${escapeHtml(showLabel)}</div>
-      </div>
-      `;
-      row.addEventListener('click', () => selectForRole(role, idx));
-      suggestionsEl.appendChild(row);
+      const displayName = (item.properties && (item.properties.name || item.properties.id)) || '';
+      const key = String(displayName).toLowerCase().trim();
+      if (!groups.has(key)) groups.set(key, { displayName, entries: [] });
+      groups.get(key).entries.push({ idx, item });
     });
 
+    // Build DOM: iterate groups in insertion order (which follows results order).
+    outer: for (const [key, group] of groups) {
+      // Create a container for the group
+      const groupWrap = document.createElement('div');
+      groupWrap.className = 'suggestion-group';
+      // Header: bold name (non-selectable)
+      const header = document.createElement('div');
+      header.className = 'suggestion-group-header';
+      header.innerHTML = `<strong>${escapeHtml(String(group.displayName || ''))}</strong>`;
+      groupWrap.appendChild(header);
+
+      // For this group, collect unique rank labels (use first occurrence if multiple)
+      const rankMap = new Map(); // rankKey -> originalIdx
+      for (const e of group.entries) {
+        const feat = e.item;
+        const rank = (feat.properties && (feat.properties.rank ?? feat.properties.rank)) ?? null;
+        const rankKey = String(rank === null || rank === undefined ? '__none' : rank);
+        if (!rankMap.has(rankKey)) rankMap.set(rankKey, e.idx);
+      }
+
+      // For each unique rank, create a selectable row. Respect maxSuggestions: stop if reached.
+      for (const [rankKey, originalIdx] of rankMap) {
+        if (st.selectableIndices.length >= maxSuggestions) break outer;
+
+        const origResult = results[originalIdx];
+        const origItem = origResult.item || origResult;
+        const rawRank = (origItem.properties && (origItem.properties.rank ?? null));
+        const rankLabel = (rawRank !== null && rawRank !== undefined && rankLabelMap.hasOwnProperty(rawRank))
+        ? rankLabelMap[rawRank]
+        : (rawRank !== null && rawRank !== undefined ? String(rawRank) : 'Other');
+
+        const row = document.createElement('div');
+        row.className = 'suggestion';
+        row.dataset.index = originalIdx;
+        const optionId = `ml-${role}-suggestion-${st.selectableIndices.length}`;
+        row.id = optionId;
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', 'false');
+
+        // Show rank label (smaller text). Clicking selects the underlying specific feature.
+        row.innerHTML = `
+        <div style="flex:1; font-size:12px; color:#333">${escapeHtml(String(rankLabel))}</div>
+        `;
+        row.addEventListener('click', () => selectForRole(role, Number(row.dataset.index)));
+        groupWrap.appendChild(row);
+
+        st.selectableIndices.push(originalIdx);
+      }
+
+      suggestionsEl.appendChild(groupWrap);
+    }
+
+    // After building, activate the first selectable item if present
     const items = Array.from(suggestionsEl.querySelectorAll('.suggestion'));
     if (items.length) {
       st.activeIndex = 0;
@@ -496,12 +542,12 @@ if (settingsBtn && settingsPanel) {
   }
 
   function setSelectedFeature(role, feat) {
-  if (!feat) selected[role] = null;
-  else selected[role] = feat;
+    if (!feat) selected[role] = null;
+    else selected[role] = feat;
 
-  const inp = state[role].input;
-  if (selected[role]) inp.value = selected[role].properties.name || selected[role].properties.id || '';
-  else inp.value = '';
+    const inp = state[role].input;
+    if (selected[role]) inp.value = selected[role].properties.name || selected[role].properties.id || '';
+    else inp.value = '';
 
     const feats = [];
     if (selected.source) feats.push({
@@ -534,7 +580,7 @@ if (settingsBtn && settingsPanel) {
       } catch (e2) {}
       map.addSource('search-selected', { type: 'geojson', data: fc });
     }
-      updateClearButtonVisibility(role);
+    updateClearButtonVisibility(role);
   }
 
   // === Sidebar / route rendering (updated for v2 API) ===
@@ -1121,20 +1167,20 @@ if (settingsBtn && settingsPanel) {
     }
   }
 
-async function fetchAndRenderRouteIfReady() {
-  if (!selected.source || !selected.target) {
-    try {
-      if (map.getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
-      if (map.getSource('search-route-ends')) map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: [] });
-    } catch (e) {}
-    await updateSidebarForRoute(null);
-    return;
-  }
-  const sid = selected.source.properties.id;
-  const tid = selected.target.properties.id;
-  if (!sid || !tid) return;
-  const year = (state.settings && state.settings.year) ?  Number(state.settings.year) : 1914;
-  const url = `${apiBase}/v2/route?source=${encodeURIComponent(sid)}&target=${encodeURIComponent(tid)}&year=${encodeURIComponent(year)}`;
+  async function fetchAndRenderRouteIfReady() {
+    if (!selected.source || !selected.target) {
+      try {
+        if (map.getSource('search-route')) map.getSource('search-route').setData({ type: 'FeatureCollection', features: [] });
+        if (map.getSource('search-route-ends')) map.getSource('search-route-ends').setData({ type: 'FeatureCollection', features: [] });
+      } catch (e) {}
+      await updateSidebarForRoute(null);
+      return;
+    }
+    const sid = selected.source.properties.id;
+    const tid = selected.target.properties.id;
+    if (!sid || !tid) return;
+    const year = (state.settings && state.settings.year) ?  Number(state.settings.year) : 1914;
+    const url = `${apiBase}/v2/route?source=${encodeURIComponent(sid)}&target=${encodeURIComponent(tid)}&year=${encodeURIComponent(year)}`;
 
     try {
       const res = await fetch(url, { cache: 'no-store' });
@@ -1448,21 +1494,27 @@ async function fetchAndRenderRouteIfReady() {
       try { st.input.focus(); } catch (e) {}
     });
 
-st.input.addEventListener('input', () => {
-  if (st.debounce) clearTimeout(st.debounce);
-  st.debounce = setTimeout(() => {
-    const q = st.input.value.trim();
-    searchForRole(role, q);
-  }, 160);
-  updateClearButtonVisibility(role); // ADD THIS LINE
-});
+    st.input.addEventListener('input', () => {
+      if (st.debounce) clearTimeout(st.debounce);
+      st.debounce = setTimeout(() => {
+        const q = st.input.value.trim();
+        searchForRole(role, q);
+      }, 160);
+      updateClearButtonVisibility(role); // ADD THIS LINE
+    });
 
     st.input.addEventListener('keydown', (ev) => {
       const key = ev.key;
       if (key === 'Enter') {
         ev.preventDefault();
         if (st.activeIndex >= 0 && st.activeIndex < st.suggestionsEl.children.length) {
-          selectForRole(role, st.activeIndex);
+          // The activeIndex refers to the selectable .suggestion items within the list,
+          // not group headers. We'll query selectable items and map to the underlying index.
+          const items = Array.from(st.suggestionsEl.querySelectorAll('.suggestion'));
+          if (items[st.activeIndex]) {
+            const selIdx = Number(items[st.activeIndex].dataset.index);
+            selectForRole(role, selIdx);
+          }
         } else if (st.lastResults && st.lastResults.length) {
           selectForRole(role, 0);
         }
@@ -1636,20 +1688,20 @@ function createContainerHTML() {
   <div class="search-rows">
   <div class="search-col">
   <div class="ml-input-wrapper">
-    <input id="mlSourceBox" class="ml-input" placeholder="Search starting point..." autocomplete="off" />
-    <button type="button" class="ml-input-clear" id="mlSourceClear" aria-label="Clear starting point" style="display:none;">×</button>
+  <input id="mlSourceBox" class="ml-input" placeholder="Search starting point..." autocomplete="off" />
+  <button type="button" class="ml-input-clear" id="mlSourceClear" aria-label="Clear starting point" style="display:none;">×</button>
   </div>
   <div class="suggestions" id="mlSourceSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
   <div class="search-col">
   <div class="ml-input-wrapper">
-    <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
-    <button type="button" class="ml-input-clear" id="mlTargetClear" aria-label="Clear destination" style="display:none;">×</button>
+  <input id="mlTargetBox" class="ml-input" placeholder="Search destination..." autocomplete="off" />
+  <button type="button" class="ml-input-clear" id="mlTargetClear" aria-label="Clear destination" style="display:none;">×</button>
   </div>
   <div class="suggestions" id="mlTargetSuggestions" role="listbox" aria-expanded="false"></div>
   </div>
   <div class="ml-button-row">
-    <button type="button" id="mlSettingsBtn" class="ml-icon-btn" aria-label="Settings" title="Settings" aria-expanded="false">⚙</button>
+  <button type="button" id="mlSettingsBtn" class="ml-icon-btn" aria-label="Settings" title="Settings" aria-expanded="false">⚙</button>
   </div>
   </div>
   <div id="mlSettingsPanel" class="ml-settings-panel" style="display:none;"></div>
