@@ -1,6 +1,15 @@
 // helpers.js
 import humanizeDuration from 'humanize-duration';
 
+export const isoCodeToName = {
+    'ara' : 'Arabic',
+    'ell' : 'Greek',
+    'eng' : 'English',
+    'fra' : 'French',
+    'ota' : 'Ottoman',
+    'tur' : 'Turkish',
+}
+
 // Integer mode value to named mode mapping from API
 export const modeIntToName = {
     1: 'road',
