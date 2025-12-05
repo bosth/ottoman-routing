@@ -480,10 +480,10 @@ export default async function initSearchControl(map, opts = {}) {
 
     // Helper: get rank label string for properties
     function rankLabelForProps(props) {
-      if (! props) return '';
+      if (!props) return '';
       if (props.rank !== undefined && props.rank !== null) {
-        if (typeof props.rank === 'number' && rankLabelMap.hasOwnProperty(props.rank)) {
-          return String(rankLabelMap[props.rank]);
+        if (typeof props.rank === 'number' && rankLabelMap. hasOwnProperty(props.rank)) {
+          return String(rankLabelMap[props. rank]);
         }
         return String(props.rank);
       }
@@ -492,12 +492,12 @@ export default async function initSearchControl(map, opts = {}) {
 
     // Helper: normalize name for comparison
     function normalizeName(name) {
-      return String(name || '').toLowerCase().trim();
+      return String(name || '').toLowerCase(). trim();
     }
 
     // Build a map of all results by their node ID for quick lookup
     const resultsByNodeId = new Map();
-    results.forEach((r, resIndex) => {
+    results. forEach((r, resIndex) => {
       const item = r.item || r;
       const props = item.properties || {};
       const nodeId = props.id;
@@ -516,7 +516,7 @@ export default async function initSearchControl(map, opts = {}) {
     // First pass: identify cluster targets (IDs that are referenced by cluster property) from results
     const clusterTargets = new Set();
     results.forEach(r => {
-      const item = r.item || r;
+      const item = r. item || r;
       const props = item.properties || {};
       const clusterId = props.cluster;
       if (clusterId !== null && clusterId !== undefined) {
@@ -528,7 +528,7 @@ export default async function initSearchControl(map, opts = {}) {
     const nodeIdsInResults = new Set();
     results.forEach(r => {
       const item = r.item || r;
-      const props = item.properties || {};
+      const props = item. properties || {};
       if (props.id !== undefined && props.id !== null) {
         nodeIdsInResults.add(String(props.id));
       }
@@ -553,12 +553,12 @@ export default async function initSearchControl(map, opts = {}) {
       const clusterId = props.cluster;
 
       if (processedNodeIds.has(nodeId)) return;
-      processedNodeIds.add(nodeId);
+      processedNodeIds. add(nodeId);
 
       if (clusterId === null || clusterId === undefined) {
         // This node has no cluster - check if it's a cluster header
         if (clusterTargets.has(nodeId)) {
-          if (!clusterGroups.has(nodeId)) {
+          if (! clusterGroups.has(nodeId)) {
             clusterGroups.set(nodeId, { header: { resIndex, item }, members: [] });
           } else {
             clusterGroups.get(nodeId).header = { resIndex, item };
@@ -577,7 +577,7 @@ export default async function initSearchControl(map, opts = {}) {
     });
 
     // For clusters where the header wasn't in results, try to find it from allFeatures
-    for (const [clusterId, group] of clusterGroups.entries()) {
+    for (const [clusterId, group] of clusterGroups. entries()) {
       if (! group.header) {
         const headerFeature = allFeatures.find(f =>
         f.properties && String(f.properties.id) === clusterId
@@ -595,7 +595,7 @@ export default async function initSearchControl(map, opts = {}) {
         existingMemberIds.add(String(group.header.item.properties.id));
       }
       group.members.forEach(m => {
-        if (m.item && m.item.properties && m.item.properties.id !== undefined) {
+        if (m. item && m.item.properties && m.item.properties.id !== undefined) {
           existingMemberIds.add(String(m.item.properties.id));
         }
       });
@@ -606,7 +606,7 @@ export default async function initSearchControl(map, opts = {}) {
         if (props.cluster !== null && props.cluster !== undefined && String(props.cluster) === clusterId) {
           const fId = String(props.id);
           if (!existingMemberIds.has(fId)) {
-            existingMemberIds.add(fId);
+            existingMemberIds. add(fId);
             group.members.push({ resIndex: -1, item: f });
           }
         }
@@ -614,22 +614,37 @@ export default async function initSearchControl(map, opts = {}) {
     }
 
     // Render function for a selectable cluster member row
-    function createMemberRow(resIndex, item, headerName) {
-      if (st.selectableIndices.length >= maxSuggestions) return null;
+    function createMemberRow(resIndex, item, headerName, headerNodeId) {
+      if (st. selectableIndices. length >= maxSuggestions) return null;
 
       const props = item.properties || {};
       const name = String(props.name || '').trim();
       const rankLabel = rankLabelForProps(props);
-      const headerNameNorm = normalizeName(headerName);
       const nameNorm = normalizeName(name);
 
+      // Collect all names for nodes that share the HEADER's ID (the root node)
+      const namesForHeaderId = new Set();
+      if (headerNodeId !== undefined && headerNodeId !== null) {
+        allFeatures.forEach(f => {
+          if (f. properties && String(f.properties. id) === String(headerNodeId)) {
+            const n = f.properties.name;
+            if (n) {
+              namesForHeaderId.add(normalizeName(n));
+            }
+          }
+        });
+      }
+
+      // Check if current node's name matches ANY name from nodes sharing the header's ID
+      const nameMatchesAnyHeaderName = namesForHeaderId.has(nameNorm);
+
       let displayText;
-      if (nameNorm === headerNameNorm || ! name) {
-        // Name matches header or is empty - just show rank
-        displayText = rankLabel || (props.id !== undefined ?  String(props.id) : 'Unknown');
+      if (nameMatchesAnyHeaderName || !name) {
+        // Name matches one of the header's names or is empty - just show rank
+        displayText = rankLabel || (props.id !== undefined ? String(props.id) : 'Unknown');
       } else {
         // Name is different - show "Name (rank)"
-        displayText = rankLabel ?  `${name} (${rankLabel})` : name;
+        displayText = rankLabel ? `${name} (${rankLabel})` : name;
       }
 
       const row = document.createElement('div');
@@ -640,12 +655,12 @@ export default async function initSearchControl(map, opts = {}) {
       if (resIndex === -1) {
         // This item came from allFeatures, not from results - add it as a synthetic result
         const syntheticIndex = st.lastResults.length;
-        st.lastResults.push({ item: item, score: 1 });
+        st. lastResults.push({ item: item, score: 1 });
         selectableIndex = syntheticIndex;
       }
 
       row.dataset.index = selectableIndex;
-      const optionId = `ml-${role}-suggestion-${st.selectableIndices.length}`;
+      const optionId = `ml-${role}-suggestion-${st.selectableIndices. length}`;
       row.id = optionId;
       row.setAttribute('role', 'option');
       row.setAttribute('aria-selected', 'false');
@@ -659,7 +674,7 @@ export default async function initSearchControl(map, opts = {}) {
 
     // Render function for standalone (non-clustered) row - name bold, rank below in pale text
     function createStandaloneRow(resIndex, item) {
-      if (st.selectableIndices.length >= maxSuggestions) return null;
+      if (st.selectableIndices. length >= maxSuggestions) return null;
 
       const props = item.properties || {};
       const name = String(props.name || '').trim();
@@ -697,7 +712,7 @@ export default async function initSearchControl(map, opts = {}) {
       const item = r.item || r;
       const props = item.properties || {};
       const nodeId = String(props.id);
-      const clusterId = props.cluster;
+      const clusterId = props. cluster;
 
       // Determine which cluster this result belongs to
       let clusterKey = null;
@@ -714,9 +729,10 @@ export default async function initSearchControl(map, opts = {}) {
         const group = clusterGroups.get(clusterKey);
         if (! group) return;
 
-        // Get header name for comparison
+        // Get header name and ID for comparison
         const headerProps = group.header ?  (group.header.item.properties || {}) : {};
-        const headerName = String(headerProps.name || headerProps.id || 'Unknown').trim();
+        const headerName = String(headerProps. name || headerProps.id || 'Unknown'). trim();
+        const headerNodeId = headerProps.id;
 
         // Render header (non-selectable, bold)
         const headerRow = document.createElement('div');
@@ -726,7 +742,7 @@ export default async function initSearchControl(map, opts = {}) {
 
         // Render the header node as first selectable member
         if (group.header && group.header.resIndex >= 0) {
-          const headerMemberRow = createMemberRow(group.header.resIndex, group.header.item, headerName);
+          const headerMemberRow = createMemberRow(group.header.resIndex, group. header.item, headerName, headerNodeId);
           if (headerMemberRow) {
             suggestionsEl.appendChild(headerMemberRow);
           }
@@ -735,7 +751,7 @@ export default async function initSearchControl(map, opts = {}) {
         // Render other member nodes
         group.members.forEach(member => {
           if (st.selectableIndices.length >= maxSuggestions) return;
-          const memberRow = createMemberRow(member.resIndex, member.item, headerName);
+          const memberRow = createMemberRow(member.resIndex, member.item, headerName, headerNodeId);
           if (memberRow) {
             suggestionsEl.appendChild(memberRow);
           }
@@ -753,12 +769,12 @@ export default async function initSearchControl(map, opts = {}) {
     });
 
     // Activate the first selectable item if present
-    const items = Array.from(suggestionsEl.querySelectorAll('.suggestion'));
+    const items = Array.from(suggestionsEl. querySelectorAll('.suggestion'));
     if (items.length) {
       st.activeIndex = 0;
-      items.forEach((it, i) => {
+      items. forEach((it, i) => {
         const isActive = i === st.activeIndex;
-        it.classList.toggle('active', isActive);
+        it. classList.toggle('active', isActive);
         it.setAttribute('aria-selected', isActive ?  'true' : 'false');
       });
       const activeEl = items[st.activeIndex];
