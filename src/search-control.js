@@ -138,8 +138,10 @@ export default async function initSearchControl(map, opts = {}) {
   const nodeLinesCache = new Map();
 
   // Helper function to fetch lines for a node
+  // Updated to parse the new response format:
+  // {"result":{"names":[],"lines":[{"name":"some name","colour":"#000000","mode":"railway"}]}}
   async function fetchNodeLines(nodeId) {
-    if (! nodeId) return null;
+    if (! nodeId) return { names: [], lines: [] };
 
     // Check cache first
     if (nodeLinesCache.has(String(nodeId))) {
@@ -153,16 +155,59 @@ export default async function initSearchControl(map, opts = {}) {
       if (!res.ok) throw new Error('Fetch failed: ' + res.status);
       const data = await res.json();
 
-      // The response is { json_agg: [...] } or similar
-      const lines = Array.isArray(data?.json_agg) ? data.json_agg :
-      Array.isArray(data) ? data : [];
+      // New format: { result: { names: [...], lines: [...] } }
+      const result = (data && data.result) ? data.result : {};
+      const names = Array.isArray(result.names) ? result.names : [];
+      const lines = Array.isArray(result.lines) ? result.lines : [];
 
-      // Cache the result
-      nodeLinesCache.set(String(nodeId), lines);
-      return lines;
+      const payload = { names, lines };
+      nodeLinesCache.set(String(nodeId), payload);
+      return payload;
     } catch (err) {
       console.warn('Failed to fetch lines for node', nodeId, err);
-      return null;
+      const payload = { names: [], lines: [] };
+      nodeLinesCache.set(String(nodeId), payload);
+      return payload;
+    }
+  }
+
+  // Helper function to render alternate names into the card (will create section if missing)
+  function updateAlternatesInCard(cardEl, namesFromApi) {
+    if (!cardEl || !Array.isArray(namesFromApi) || namesFromApi.length === 0) return;
+
+    // Find or create alternates container
+    let alternatesSection = cardEl.querySelector('.ml-node-card-alternates');
+    if (!alternatesSection) {
+      alternatesSection = document.createElement('div');
+      alternatesSection.className = 'ml-node-card-alternates';
+      alternatesSection.innerHTML = `<div class="ml-node-card-alternates-list"></div>`;
+      // Insert before lines section if present, otherwise append
+      const linesSec = cardEl.querySelector('.ml-node-card-lines');
+      if (linesSec && linesSec.parentNode) linesSec.parentNode.insertBefore(alternatesSection, linesSec);
+      else cardEl.querySelector('.ml-node-card-content').appendChild(alternatesSection);
+    }
+
+    const listEl = alternatesSection.querySelector('.ml-node-card-alternates-list') || document.createElement('div');
+    listEl.className = 'ml-node-card-alternates-list';
+
+    // Keep existing alternates (from getNodeAlternateNames) and append unique API names
+    const existing = Array.from(listEl.children).map(ch => (ch.textContent || '').trim().toLowerCase());
+    const items = [];
+
+    namesFromApi.forEach(n => {
+      if (!n) return;
+      const s = String(n).trim();
+      if (!s) return;
+      if (existing.includes(s.toLowerCase())) return;
+      items.push(`<div class="ml-node-card-alternate">${escapeHtml(s)}</div>`);
+    });
+
+    if (items.length) {
+      listEl.innerHTML = listEl.innerHTML + items.join('');
+    }
+
+    if (!alternatesSection.parentNode) {
+      cardEl.querySelector('.ml-node-card-content').appendChild(alternatesSection);
     }
   }
 
@@ -177,20 +222,20 @@ export default async function initSearchControl(map, opts = {}) {
 
     const listHtml = lines.map(line => {
       const name = escapeHtml(String(line.name || 'Unknown'));
-      const colour = line.colour || '#000000';
+      const colour = String(line.colour || '#000000');
       const mode = escapeHtml(String(line.mode || ''));
 
       return `
       <div class="ml-node-card-line">
-      <div class="ml-node-card-line-name" style="color: ${escapeHtml(colour)}">${name}</div>
-      ${mode ? `<div class="ml-node-card-line-mode">${mode}</div>` : ''}
+        <div class="ml-node-card-line-name" style="color: ${escapeHtml(colour)}">${name}</div>
+        ${mode ? `<div class="ml-node-card-line-mode">${mode}</div>` : ''}
       </div>
       `;
     }).join('');
 
     linesContainer.innerHTML = `
-    <div class="ml-node-card-lines-label">Lines</div>
-    <div class="ml-node-card-lines-list">${listHtml}</div>
+      <div class="ml-node-card-lines-label">Lines</div>
+      <div class="ml-node-card-lines-list">${listHtml}</div>
     `;
   }
 
@@ -418,6 +463,7 @@ export default async function initSearchControl(map, opts = {}) {
     }
   }
 
+  // Replace the existing renderSuggestionsForRole function in src/search-control.js
   function renderSuggestionsForRole(role) {
     const st = state[role];
     const suggestionsEl = st.suggestionsEl;
@@ -426,83 +472,294 @@ export default async function initSearchControl(map, opts = {}) {
     st.selectableIndices = [];
 
     const results = st.lastResults;
-    if (!results || !results.length) {
+    if (!results || ! results.length) {
       suggestionsEl.removeAttribute('aria-activedescendant');
       suggestionsEl.setAttribute('aria-expanded', 'false');
       return;
     }
 
-    // Group results by display name (case-insensitive) to avoid repeating the same name.
-    // For each name group we'll show the name once (bold) and then the distinct rank labels beneath it.
-    const groups = new Map(); // key -> { displayName, entries: [ { idx, item } ] }
-    results.forEach((r, idx) => {
-      const item = r.item || r;
-      const displayName = (item.properties && (item.properties.name || item.properties.id)) || '';
-      const key = String(displayName).toLowerCase().trim();
-      if (!groups.has(key)) groups.set(key, { displayName, entries: [] });
-      groups.get(key).entries.push({ idx, item });
-    });
-
-    // Build DOM: iterate groups in insertion order (which follows results order).
-    outer: for (const [key, group] of groups) {
-      // Create a container for the group
-      const groupWrap = document.createElement('div');
-      groupWrap.className = 'suggestion-group';
-      // Header: bold name (non-selectable)
-      const header = document.createElement('div');
-      header.className = 'suggestion-group-header';
-      header.innerHTML = `<strong>${escapeHtml(String(group.displayName || ''))}</strong>`;
-      groupWrap.appendChild(header);
-
-      // For this group, collect unique rank labels (use first occurrence if multiple)
-      const rankMap = new Map(); // rankKey -> originalIdx
-      for (const e of group.entries) {
-        const feat = e.item;
-        const rank = (feat.properties && (feat.properties.rank ?? feat.properties.rank)) ?? null;
-        const rankKey = String(rank === null || rank === undefined ? '__none' : rank);
-        if (!rankMap.has(rankKey)) rankMap.set(rankKey, e.idx);
+    // Helper: get rank label string for properties
+    function rankLabelForProps(props) {
+      if (! props) return '';
+      if (props.rank !== undefined && props.rank !== null) {
+        if (typeof props.rank === 'number' && rankLabelMap.hasOwnProperty(props.rank)) {
+          return String(rankLabelMap[props.rank]);
+        }
+        return String(props.rank);
       }
-
-      // For each unique rank, create a selectable row. Respect maxSuggestions: stop if reached.
-      for (const [rankKey, originalIdx] of rankMap) {
-        if (st.selectableIndices.length >= maxSuggestions) break outer;
-
-        const origResult = results[originalIdx];
-        const origItem = origResult.item || origResult;
-        const rawRank = (origItem.properties && (origItem.properties.rank ?? null));
-        const rankLabel = (rawRank !== null && rawRank !== undefined && rankLabelMap.hasOwnProperty(rawRank))
-        ? rankLabelMap[rawRank]
-        : (rawRank !== null && rawRank !== undefined ? String(rawRank) : 'Other');
-
-        const row = document.createElement('div');
-        row.className = 'suggestion';
-        row.dataset.index = originalIdx;
-        const optionId = `ml-${role}-suggestion-${st.selectableIndices.length}`;
-        row.id = optionId;
-        row.setAttribute('role', 'option');
-        row.setAttribute('aria-selected', 'false');
-
-        // Show rank label (smaller text). Clicking selects the underlying specific feature.
-        row.innerHTML = `
-        <div style="flex:1; font-size:12px; color:#333">${escapeHtml(String(rankLabel))}</div>
-        `;
-        row.addEventListener('click', () => selectForRole(role, Number(row.dataset.index)));
-        groupWrap.appendChild(row);
-
-        st.selectableIndices.push(originalIdx);
-      }
-
-      suggestionsEl.appendChild(groupWrap);
+      return '';
     }
 
-    // After building, activate the first selectable item if present
+    // Helper: normalize name for comparison
+    function normalizeName(name) {
+      return String(name || '').toLowerCase().trim();
+    }
+
+    // Build a map of all results by their node ID for quick lookup
+    const resultsByNodeId = new Map();
+    results.forEach((r, resIndex) => {
+      const item = r.item || r;
+      const props = item.properties || {};
+      const nodeId = props.id;
+      if (nodeId !== undefined && nodeId !== null) {
+        if (!resultsByNodeId.has(String(nodeId))) {
+          resultsByNodeId.set(String(nodeId), { resIndex, item });
+        }
+      }
+    });
+
+    // Build cluster groups
+    const clusterGroups = new Map();
+    const standalone = [];
+    const processedNodeIds = new Set();
+
+    // First pass: identify cluster targets (IDs that are referenced by cluster property) from results
+    const clusterTargets = new Set();
+    results.forEach(r => {
+      const item = r.item || r;
+      const props = item.properties || {};
+      const clusterId = props.cluster;
+      if (clusterId !== null && clusterId !== undefined) {
+        clusterTargets.add(String(clusterId));
+      }
+    });
+
+    // Also check if any result node IS a cluster target (has other nodes pointing to it in allFeatures)
+    const nodeIdsInResults = new Set();
+    results.forEach(r => {
+      const item = r.item || r;
+      const props = item.properties || {};
+      if (props.id !== undefined && props.id !== null) {
+        nodeIdsInResults.add(String(props.id));
+      }
+    });
+
+    // Find all nodes in allFeatures that point to nodes in our results
+    allFeatures.forEach(f => {
+      const props = f.properties || {};
+      const clusterId = props.cluster;
+      if (clusterId !== null && clusterId !== undefined) {
+        if (nodeIdsInResults.has(String(clusterId))) {
+          clusterTargets.add(String(clusterId));
+        }
+      }
+    });
+
+    // Second pass: group results
+    results.forEach((r, resIndex) => {
+      const item = r.item || r;
+      const props = item.properties || {};
+      const nodeId = String(props.id);
+      const clusterId = props.cluster;
+
+      if (processedNodeIds.has(nodeId)) return;
+      processedNodeIds.add(nodeId);
+
+      if (clusterId === null || clusterId === undefined) {
+        // This node has no cluster - check if it's a cluster header
+        if (clusterTargets.has(nodeId)) {
+          if (!clusterGroups.has(nodeId)) {
+            clusterGroups.set(nodeId, { header: { resIndex, item }, members: [] });
+          } else {
+            clusterGroups.get(nodeId).header = { resIndex, item };
+          }
+        } else {
+          standalone.push({ resIndex, item });
+        }
+      } else {
+        // This node belongs to a cluster
+        const clusterIdStr = String(clusterId);
+        if (!clusterGroups.has(clusterIdStr)) {
+          clusterGroups.set(clusterIdStr, { header: null, members: [] });
+        }
+        clusterGroups.get(clusterIdStr).members.push({ resIndex, item });
+      }
+    });
+
+    // For clusters where the header wasn't in results, try to find it from allFeatures
+    for (const [clusterId, group] of clusterGroups.entries()) {
+      if (! group.header) {
+        const headerFeature = allFeatures.find(f =>
+        f.properties && String(f.properties.id) === clusterId
+        );
+        if (headerFeature) {
+          group.header = { resIndex: -1, item: headerFeature };
+        }
+      }
+    }
+
+    // For clusters, also pull in any members from allFeatures that weren't in results
+    for (const [clusterId, group] of clusterGroups.entries()) {
+      const existingMemberIds = new Set();
+      if (group.header && group.header.item && group.header.item.properties) {
+        existingMemberIds.add(String(group.header.item.properties.id));
+      }
+      group.members.forEach(m => {
+        if (m.item && m.item.properties && m.item.properties.id !== undefined) {
+          existingMemberIds.add(String(m.item.properties.id));
+        }
+      });
+
+      // Find additional members from allFeatures
+      allFeatures.forEach(f => {
+        const props = f.properties || {};
+        if (props.cluster !== null && props.cluster !== undefined && String(props.cluster) === clusterId) {
+          const fId = String(props.id);
+          if (!existingMemberIds.has(fId)) {
+            existingMemberIds.add(fId);
+            group.members.push({ resIndex: -1, item: f });
+          }
+        }
+      });
+    }
+
+    // Render function for a selectable cluster member row
+    function createMemberRow(resIndex, item, headerName) {
+      if (st.selectableIndices.length >= maxSuggestions) return null;
+
+      const props = item.properties || {};
+      const name = String(props.name || '').trim();
+      const rankLabel = rankLabelForProps(props);
+      const headerNameNorm = normalizeName(headerName);
+      const nameNorm = normalizeName(name);
+
+      let displayText;
+      if (nameNorm === headerNameNorm || ! name) {
+        // Name matches header or is empty - just show rank
+        displayText = rankLabel || (props.id !== undefined ?  String(props.id) : 'Unknown');
+      } else {
+        // Name is different - show "Name (rank)"
+        displayText = rankLabel ?  `${name} (${rankLabel})` : name;
+      }
+
+      const row = document.createElement('div');
+      row.className = 'suggestion suggestion-member';
+
+      // Store the actual resIndex, or if -1 (from allFeatures), we need to find or create an index
+      let selectableIndex = resIndex;
+      if (resIndex === -1) {
+        // This item came from allFeatures, not from results - add it as a synthetic result
+        const syntheticIndex = st.lastResults.length;
+        st.lastResults.push({ item: item, score: 1 });
+        selectableIndex = syntheticIndex;
+      }
+
+      row.dataset.index = selectableIndex;
+      const optionId = `ml-${role}-suggestion-${st.selectableIndices.length}`;
+      row.id = optionId;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
+
+      row.innerHTML = `<span class="suggestion-member-text">${escapeHtml(displayText)}</span>`;
+      row.addEventListener('click', () => selectForRole(role, selectableIndex));
+
+      st.selectableIndices.push(selectableIndex);
+      return row;
+    }
+
+    // Render function for standalone (non-clustered) row - name bold, rank below in pale text
+    function createStandaloneRow(resIndex, item) {
+      if (st.selectableIndices.length >= maxSuggestions) return null;
+
+      const props = item.properties || {};
+      const name = String(props.name || '').trim();
+      const rankLabel = rankLabelForProps(props);
+      const displayName = name || (props.id !== undefined ? String(props.id) : 'Unknown');
+
+      const row = document.createElement('div');
+      row.className = 'suggestion suggestion-standalone';
+      row.dataset.index = resIndex;
+      const optionId = `ml-${role}-suggestion-${st.selectableIndices.length}`;
+      row.id = optionId;
+      row.setAttribute('role', 'option');
+      row.setAttribute('aria-selected', 'false');
+
+      let html = `<div class="suggestion-standalone-content">`;
+      html += `<div class="suggestion-standalone-name">${escapeHtml(displayName)}</div>`;
+      if (rankLabel) {
+        html += `<div class="suggestion-standalone-rank">${escapeHtml(rankLabel)}</div>`;
+      }
+      html += `</div>`;
+
+      row.innerHTML = html;
+      row.addEventListener('click', () => selectForRole(role, resIndex));
+
+      st.selectableIndices.push(resIndex);
+      return row;
+    }
+
+    // Render cluster groups first (in order of first appearance in results)
+    const renderedClusters = new Set();
+
+    results.forEach((r) => {
+      if (st.selectableIndices.length >= maxSuggestions) return;
+
+      const item = r.item || r;
+      const props = item.properties || {};
+      const nodeId = String(props.id);
+      const clusterId = props.cluster;
+
+      // Determine which cluster this result belongs to
+      let clusterKey = null;
+      if (clusterId === null || clusterId === undefined) {
+        if (clusterGroups.has(nodeId)) {
+          clusterKey = nodeId;
+        }
+      } else {
+        clusterKey = String(clusterId);
+      }
+
+      if (clusterKey && !renderedClusters.has(clusterKey)) {
+        renderedClusters.add(clusterKey);
+        const group = clusterGroups.get(clusterKey);
+        if (! group) return;
+
+        // Get header name for comparison
+        const headerProps = group.header ?  (group.header.item.properties || {}) : {};
+        const headerName = String(headerProps.name || headerProps.id || 'Unknown').trim();
+
+        // Render header (non-selectable, bold)
+        const headerRow = document.createElement('div');
+        headerRow.className = 'suggestion-header';
+        headerRow.innerHTML = `<strong>${escapeHtml(headerName)}</strong>`;
+        suggestionsEl.appendChild(headerRow);
+
+        // Render the header node as first selectable member
+        if (group.header && group.header.resIndex >= 0) {
+          const headerMemberRow = createMemberRow(group.header.resIndex, group.header.item, headerName);
+          if (headerMemberRow) {
+            suggestionsEl.appendChild(headerMemberRow);
+          }
+        }
+
+        // Render other member nodes
+        group.members.forEach(member => {
+          if (st.selectableIndices.length >= maxSuggestions) return;
+          const memberRow = createMemberRow(member.resIndex, member.item, headerName);
+          if (memberRow) {
+            suggestionsEl.appendChild(memberRow);
+          }
+        });
+      }
+    });
+
+    // Render standalone nodes
+    standalone.forEach(({ resIndex, item }) => {
+      if (st.selectableIndices.length >= maxSuggestions) return;
+      const row = createStandaloneRow(resIndex, item);
+      if (row) {
+        suggestionsEl.appendChild(row);
+      }
+    });
+
+    // Activate the first selectable item if present
     const items = Array.from(suggestionsEl.querySelectorAll('.suggestion'));
     if (items.length) {
       st.activeIndex = 0;
       items.forEach((it, i) => {
         const isActive = i === st.activeIndex;
         it.classList.toggle('active', isActive);
-        it.setAttribute('aria-selected', isActive ? 'true' : 'false');
+        it.setAttribute('aria-selected', isActive ?  'true' : 'false');
       });
       const activeEl = items[st.activeIndex];
       if (activeEl) {
@@ -932,7 +1189,7 @@ export default async function initSearchControl(map, opts = {}) {
         const isExpanded = el.classList.toggle('expanded');
         el.setAttribute('aria-expanded', isExpanded ?  'true' : 'false');
 
-        // Fetch lines on first expand
+        // Fetch lines & names on first expand
         if (isExpanded && el.dataset.linesLoaded === 'false') {
           const nodeId = el.dataset.nodeId;
           const linesContainer = el.querySelector('.ml-node-card-lines');
@@ -941,8 +1198,12 @@ export default async function initSearchControl(map, opts = {}) {
             el.dataset.linesLoaded = 'true'; // Mark as loading/loaded
 
             try {
-              const lines = await fetchNodeLines(nodeId);
-              renderNodeLines(linesContainer, lines);
+              const payload = await fetchNodeLines(nodeId);
+              renderNodeLines(linesContainer, payload.lines);
+              // Update alternates from API names (if any)
+              if (payload.names && payload.names.length) {
+                updateAlternatesInCard(el, payload.names);
+              }
             } catch (err) {
               linesContainer.innerHTML = '<div class="ml-node-card-lines-error">Failed to load lines</div>';
             }
