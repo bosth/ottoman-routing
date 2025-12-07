@@ -592,11 +592,25 @@ export default async function initSearchControl(map, opts = {}) {
     });
 
     // For clusters where the header wasn't in results, try to find it from allFeatures
+    // For clusters where the header wasn't in results, try to find it from allFeatures
     for (const [clusterId, group] of clusterGroups.entries()) {
-      if (! group.header) {
-        const headerFeature = allFeatures.find(f =>
-        f.properties && String(f.properties.id) === clusterId
+      if (!group.header) {
+        // FIX: Prefer the main node (with geometry) as the header
+        let headerFeature = allFeatures.find(f =>
+        f.properties &&
+        String(f.properties.id) === clusterId &&
+        f.geometry &&
+        f.geometry.coordinates &&
+        (f.geometry.type === 'Point' ? (f.geometry.coordinates[0] !== 0 || f.geometry.coordinates[1] !== 0) : true)
         );
+
+        // Fallback if no geometry node found, take any node with that ID
+        if (!headerFeature) {
+          headerFeature = allFeatures.find(f =>
+          f.properties && String(f.properties.id) === clusterId
+          );
+        }
+
         if (headerFeature) {
           group.header = { resIndex: -1, item: headerFeature };
         }
