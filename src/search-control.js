@@ -16,6 +16,7 @@ import {
     shuffle,
     modeIntToName,
     isoCodeToName,
+    wrapArabic,
 } from './helpers.js';
 
 export default async function initSearchControl(map, opts = {}) {
@@ -215,7 +216,7 @@ export default async function initSearchControl(map, opts = {}) {
       // Build display string: "Name (lang)" or just "Name" if no language code
       const displayText = iso639 ?  `${name} (${iso639})` : name;
 
-      items.push(`<div class="ml-node-card-alternate">${escapeHtml(displayText)}</div>`);
+      items.push(`<div class="ml-node-card-alternate">${wrapArabic(displayText)}</div>`);
     });
 
     // Replace all alternates with the API data
@@ -236,7 +237,7 @@ export default async function initSearchControl(map, opts = {}) {
     }
 
     const listHtml = lines.map(line => {
-      const name = escapeHtml(String(line.name || 'Unknown'));
+      const name = wrapArabic(String(line.name || 'Unknown'));
       const colour = String(line.colour || '#000000');
       const mode = escapeHtml(String(line.mode || ''));
 
@@ -416,11 +417,14 @@ export default async function initSearchControl(map, opts = {}) {
 
   const fuse = new Fuse(allFeatures, {
     keys: ['properties.name', 'properties.id'],
-    threshold: 0.45,
-    distance: 100,
-    minMatchCharLength: 1,
+    threshold: 0.33,
+    distance: 8,
+    minMatchCharLength: 2,
+    isCaseSensitive: false,
     ignoreDiacritics: true,
-    includeScore: true
+    includeScore: true,
+    shouldSort: true,
+    location: 0
   });
 
   const selectedEmpty = { type: 'FeatureCollection', features: [] };
@@ -1028,7 +1032,7 @@ export default async function initSearchControl(map, opts = {}) {
 
     const summaryHtml = `
     <div class="ml-summary">
-    <div class="ml-summary-left">${escapeHtml(String(firstSource))} 🢒 ${escapeHtml(String(lastTarget))}</div>
+    <div class="ml-summary-left">${wrapArabic(firstSource)} 🢒 ${wrapArabic(lastTarget)}</div>
     <div class="ml-summary-right">${escapeHtml(String(totalHuman))}</div>
     </div>`;
 
@@ -1110,7 +1114,7 @@ export default async function initSearchControl(map, opts = {}) {
 
     const flowRowsHtml = rows.map((row, rowIdx) => {
       if (row.type === 'node') {
-        const label = escapeHtml(String(row.label || ''));
+        const label = wrapArabic(String(row.label || ''));
 
         // Determine rank for this node - look it up from allFeatures using nodeId
         let nodeRank = row.rank;
@@ -1182,24 +1186,37 @@ export default async function initSearchControl(map, opts = {}) {
         </div>`;
       }
 
+      // ... existing code ...
       const segColor = String(row.color || '#000000');
       const modeName = row.mode; // Already canonical string
       const symbolName = modeSymbolMap[modeName] || 'directions_walk';
 
       // For connector style
       let connectorModeClass = '';
+      let connectorStyleOverride = '';
+
       if (modeName === 'railway') connectorModeClass = 'railway';
       else if (modeName === 'narrow-gauge railway') connectorModeClass = 'railway-narrow';
       else if (modeName === 'ferry' || modeName === 'ship') connectorModeClass = modeName;
       else if (modeName === 'connection' || modeName === 'transfer') connectorModeClass = modeName;
+      else if (modeName === 'road' || modeName === 'chaussee' || modeName === 'chausee') {
+        // Cased line for road/chaussee
+        // road = thinner (e.g. 4px), chaussee = thicker (e.g. 6px)
+        const width = (modeName === 'road') ? '4px' : '6px';
+        // Use background-color + black border to create the casing effect
+        connectorStyleOverride = `background-color:${escapeHtml(segColor)}; border:1px solid #000; width:${width}; box-sizing:border-box;`;
+      }
 
       const modeLabel = (modeName === 'transfer') ? '' : escapeHtml(modeName || '');
+
+      // Use override if present, otherwise default to color property (for currentColor usage in CSS)
+      const connectorStyle = connectorStyleOverride || `color:${escapeHtml(segColor)}`;
 
       return `
       <div class="ml-flow-row ml-flow-row-seg">
       <div class="ml-flow-left">
       <span class="ml-connector ${connectorModeClass}"
-      style="color:${escapeHtml(segColor)}"></span>
+      style="${connectorStyle}"></span>
       </div>
       <div class="ml-flow-right ml-flow-right-seg">
       <div class="ml-seg-line"

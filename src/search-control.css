@@ -2,28 +2,31 @@
  *  - includes original control look + the sidebar/card/scroll behavior
  */
 
+@import url('https://fonts.googleapis.com/css2?family=Aref+Ruqaa:wght@400;700&display=swap');
 
-/* Arabic font support - Amiri for Arabic unicode ranges */
-@font-face {
-  font-family: 'Amiri';
-  font-style: normal;
+.arabic-text {
+  font-family: 'Aref Ruqaa', sans-serif;
+  font-size: 150%;
+  /* "middle" aligns the midpoint of this text with the middle of the Latin text */
+  vertical-align: top;
+
+  line-height: 0.8;
+
+  /* Optional: Adds a tiny bit of horizontal breathing room */
+  margin: 0 2px;
   font-weight: 400;
-  font-display: swap;
-  src: url(https://fonts. gstatic.com/s/amiri/v27/J7aRnpd8CGxBHqUpvY5ROdJE. woff2) format('woff2');
-  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0898-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC;
-  size-adjust: 195%; /* Makes Amiri render 15% larger */
 }
-
 
 /* Outer container base */
 .map-search-container {
-  font-family: Roboto, "Helvetica Neue", Arial, sans-serif, 'Amiri';
+  /* Replace 'Amiri' with 'Aref Ruqaa' */
+  font-family: Roboto, "Helvetica Neue", Arial, sans-serif, 'Aref Ruqaa';
   box-shadow: 0 2px 6px rgba(0,0,0,0.27);
   border-radius: 8px;
   overflow: hidden;
   background: white;
   padding: 8px;
-  width: 340px; /* narrower sidebar than the original 420px */
+  width: 340px;
   box-sizing: border-box;
   pointer-events: auto;
 }
@@ -61,7 +64,7 @@
 .ml-input {
   width: 100%;
   padding: 6px 8px;
-  font-size: 14px;
+  font-size: 16px;
   border: 1px solid #e6e9ee;
   border-radius: 6px;
   outline: none;
@@ -220,15 +223,14 @@
 
 /* Sidebar and segment list container (fills container; header stays visible) */
 .ml-sidebar {
-  font-family: Roboto, "Helvetica Neue", Arial, sans-serif, 'Amiri';
   color: #222;
   line-height: 1.2;
   box-sizing: border-box;
   padding: 10px;
-  overflow: hidden;                 /* scrolling occurs inside .ml-seg-list */
+  overflow: hidden;
   display: flex;
   flex-direction: column;
-  min-height: 0;                    /* important for flex overflow to work */
+  min-height: 0;
   flex: 1 1 auto;
   max-height: 100%;
   background: transparent;
@@ -790,7 +792,7 @@
 
 .ml-node-card-name {
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 700;
   line-height: 1.3;
   color: #222;
   word-break: break-word;

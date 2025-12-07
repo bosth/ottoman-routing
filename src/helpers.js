@@ -117,3 +117,11 @@ export function shuffle(arr) {
     }
     return arr;
 }
+
+export function wrapArabic(str) {
+    if (!str) return str;
+    // This regex matches the Arabic Unicode range you defined in CSS
+    const arabicPattern = /([\u0600-\u06FF\u0750-\u077F\u0870-\u088E\u0890-\u0891\u0898-\u08E1\u08E3-\u08FF\u200C-\u200E\u2010-\u2011\u204F\u2E41\uFB50-\uFDFF\uFE70-\uFE74\uFE76-\uFEFC]+)/g;
+
+    return String(str).replace(arabicPattern, '<span class="arabic-text">$1</span>');
+}
