@@ -170,7 +170,6 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   // Helper function to render alternate names into the card (will create section if missing)
-  // Helper function to render alternate names into the card (will create section if missing)
   // Updated to handle new names format: [{name, iso639, ...}]
   function updateAlternatesInCard(cardEl, namesFromApi) {
     if (!cardEl || !Array.isArray(namesFromApi) || namesFromApi.length === 0) {
@@ -1213,7 +1212,7 @@ export default async function initSearchControl(map, opts = {}) {
 
         // Build rank HTML (hidden by default, shown when expanded)
         const rankHtml = rankText
-        ? `<div class="ml-node-card-rank">${escapeHtml(rankText)}</div>`
+        ? `<div class="ml-node-card-rank" style="display: block;">${escapeHtml(rankText)}</div>`
         : '';
 
         // Build alternates HTML (hidden by default, shown when expanded)
