@@ -23,7 +23,7 @@
     "humanize-duration": "latest"
   },
   "devDependencies": {
-    "fuse.js": "^6.6.2",
+    "fuse.js": "^7.1.0",
     "nodemon": "latest",
     "gh-pages": "latest",
     "vite": "latest"

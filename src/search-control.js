@@ -170,17 +170,17 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   // Helper function to render alternate names into the card (will create section if missing)
+  // Helper function to render alternate names into the card (will create section if missing)
   // Updated to handle new names format: [{name, iso639, ...}]
   function updateAlternatesInCard(cardEl, namesFromApi) {
-
-    if (!cardEl || ! Array.isArray(namesFromApi) || namesFromApi.length === 0) {
+    if (!cardEl || !Array.isArray(namesFromApi) || namesFromApi.length === 0) {
       return;
     }
 
     // Find or create alternates container
     let alternatesSection = cardEl.querySelector('.ml-node-card-alternates');
 
-    if (! alternatesSection) {
+    if (!alternatesSection) {
       alternatesSection = document.createElement('div');
       alternatesSection.className = 'ml-node-card-alternates';
       alternatesSection.innerHTML = `<div class="ml-node-card-alternates-list"></div>`;
@@ -193,36 +193,105 @@ export default async function initSearchControl(map, opts = {}) {
     const listEl = alternatesSection.querySelector('.ml-node-card-alternates-list') || document.createElement('div');
     listEl.className = 'ml-node-card-alternates-list';
 
-    // Clear existing alternates and replace with API data (which has language codes)
-    const seen = new Set();
-    const items = [];
+    // 1. Get current title to avoid repetition
+    const titleEl = cardEl.querySelector('.ml-node-card-name');
+    const currentTitleRaw = titleEl ? titleEl.textContent : '';
+    const currentTitle = currentTitleRaw.trim().toLowerCase();
 
-    namesFromApi.forEach((nameObj, idx) => {
+    // 2. Determine the "original" name from allFeatures (the one with geometry)
+    const nodeId = cardEl.dataset.nodeId;
+    let originalName = '';
+    if (nodeId) {
+      const mainFeature = allFeatures.find(f =>
+      f.properties &&
+      String(f.properties.id) === String(nodeId) &&
+      f.geometry
+      );
+      if (mainFeature && mainFeature.properties && mainFeature.properties.name) {
+        originalName = String(mainFeature.properties.name).trim();
+      }
+    }
+
+    // Clear existing alternates and replace with API data
+    const seen = new Set();
+    if (currentTitle) seen.add(currentTitle);
+
+    const originalItems = [];
+    const otaItems = [];
+    const otherItems = [];
+
+    // Helper to create HTML
+    const createItem = (name, rawIso) => {
+      const isOta = (rawIso === 'ota');
+      let displayText;
+      if (isOta) {
+        displayText = name;
+      } else {
+        const isoName = rawIso ? isoCodeToName[rawIso] : '';
+        displayText = isoName ? `${name} (${isoName})` : name;
+      }
+      return `<div class="ml-node-card-alternate">${wrapArabic(displayText)}</div>`;
+    };
+
+    // If the card title is NOT the original name, add the original name first
+    // (We treat the original name as having no ISO code effectively for sorting purposes here,
+    // or we could look it up, but usually the base name in the feature doesn't have lang info attached in this context)
+    if (originalName && originalName.toLowerCase() !== currentTitle) {
+      // Check if original name is already in the API list to get its iso code?
+      // The API list `namesFromApi` usually contains all variants.
+      // Let's rely on `namesFromApi` to provide the details for the original name if possible.
+
+      // However, if we want to FORCE it to appear even if not in the random api subset or just prioritize it:
+      // We will flag it.
+    }
+
+    namesFromApi.forEach((nameObj) => {
       if (!nameObj) return;
 
-      // Handle new object format: {name, iso639, ...}
-      const name = nameObj.name ?  String(nameObj.name).trim() : '';
-      const iso639 = nameObj.iso639 ? isoCodeToName[(nameObj.iso639).trim()] : '';
+      const name = nameObj.name ? String(nameObj.name).trim() : '';
+      const rawIso = nameObj.iso639 ? String(nameObj.iso639).trim() : '';
 
       if (!name) return;
 
-      // Check for duplicates using the name only
       const nameLower = name.toLowerCase();
       if (seen.has(nameLower)) {
         return;
       }
       seen.add(nameLower);
 
-      // Build display string: "Name (lang)" or just "Name" if no language code
-      const displayText = iso639 ?  `${name} (${iso639})` : name;
+      const html = createItem(name, rawIso);
 
-      items.push(`<div class="ml-node-card-alternate">${wrapArabic(displayText)}</div>`);
+      // Priority 1: It is the "original" name (and wasn't the title)
+      if (originalName && nameLower === originalName.toLowerCase()) {
+        originalItems.push(html);
+      }
+      // Priority 2: 'ota' code
+      else if (rawIso === 'ota') {
+        otaItems.push(html);
+      }
+      // Priority 3: Others
+      else {
+        otherItems.push(html);
+      }
     });
 
-    // Replace all alternates with the API data
-    listEl.innerHTML = items.join('');
+    // If original name exists but wasn't found in namesFromApi (rare, but possible if API data is partial),
+    // and wasn't the title, we might want to inject it manually.
+    // For now, assuming namesFromApi covers it.
+    // If we missed the original name because it wasn't in namesFromApi, we check:
+    if (originalName && originalName.toLowerCase() !== currentTitle && originalItems.length === 0) {
+      // Only add if we haven't seen it (which we haven't, based on the check above)
+      // Since we don't have iso info from API, just show raw name
+      if (!seen.has(originalName.toLowerCase())) {
+        originalItems.push(`<div class="ml-node-card-alternate">${wrapArabic(originalName)}</div>`);
+        seen.add(originalName.toLowerCase());
+      }
+    }
 
-    if (! alternatesSection.parentNode) {
+    // Join in order: Original -> OTA -> Others
+    listEl.innerHTML = originalItems.join('') + otaItems.join('') + otherItems.join('');
+
+    if (!alternatesSection.parentNode) {
       cardEl.querySelector('.ml-node-card-content').appendChild(alternatesSection);
     }
   }
@@ -243,15 +312,15 @@ export default async function initSearchControl(map, opts = {}) {
 
       return `
       <div class="ml-node-card-line">
-        <div class="ml-node-card-line-name" style="color: ${escapeHtml(colour)}">${name}</div>
-        ${mode ? `<div class="ml-node-card-line-mode">${mode}</div>` : ''}
+      <div class="ml-node-card-line-name" style="color: ${escapeHtml(colour)}">${name}</div>
+      ${mode ? `<div class="ml-node-card-line-mode">${mode}</div>` : ''}
       </div>
       `;
     }).join('');
 
     linesContainer.innerHTML = `
-      <div class="ml-node-card-lines-label">Lines</div>
-      <div class="ml-node-card-lines-list">${listHtml}</div>
+    <div class="ml-node-card-lines-label">Lines</div>
+    <div class="ml-node-card-lines-list">${listHtml}</div>
     `;
   }
 
