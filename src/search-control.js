@@ -950,7 +950,7 @@ export default async function initSearchControl(map, opts = {}) {
       properties: {
         role: 'source',
         id: selected.source.properties.id,
-        name: selected.source.properties.name,
+        name: selected.source.properties.name || selected.source.properties.ota,
         shortLabel: selected.source.properties.shortLabel
       }
     });
@@ -960,7 +960,7 @@ export default async function initSearchControl(map, opts = {}) {
       properties: {
         role: 'target',
         id: selected.target.properties.id,
-        name: selected.target.properties.name,
+        name: selected.target.properties.name || selected.target.properties.ota,
         shortLabel: selected.target.properties.shortLabel
       }
     });
@@ -1007,19 +1007,11 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   // Helper function to get the preferred node name for display
-  // Priority: 1) User-entered name from search box, 2) Name from node with geometry
+  // Priority: 1) Name from node with geometry (Original Node), 2) User-entered/Selected name
   function getPreferredNodeName(nodeId) {
     if (! nodeId) return String(nodeId);
 
-    // Check if this node matches the selected source or target
-    if (selected.source && String(selected.source.properties.id) === String(nodeId)) {
-      return selected.source.properties.name || selected.source.properties.ota || selected.source.properties.id || String(nodeId);
-    }
-    if (selected.target && String(selected.target.properties.id) === String(nodeId)) {
-      return selected.target.properties.name || selected.target.properties.ota || selected.target.properties.id || String(nodeId);
-    }
-
-    // Fall back to finding a node with geometry
+    // 1. Always prioritize the "original" node (the one with geometry)
     const nodeWithGeometry = allFeatures.find(f =>
     f.properties &&
     String(f.properties.id) === String(nodeId) &&
@@ -1030,8 +1022,16 @@ export default async function initSearchControl(map, opts = {}) {
     true)
     );
 
-    if (nodeWithGeometry && nodeWithGeometry.properties) {
-      return nodeWithGeometry.properties.name || nodeWithGeometry.properties.ota || nodeWithGeometry.properties.id || String(nodeId);
+    if (nodeWithGeometry && nodeWithGeometry.properties && nodeWithGeometry.properties.name) {
+      return nodeWithGeometry.properties.name;
+    }
+
+    // 2. Fall back to selected source/target properties if original name not found
+    if (selected.source && String(selected.source.properties.id) === String(nodeId)) {
+      return selected.source.properties.name || selected.source.properties.ota || selected.source.properties.id || String(nodeId);
+    }
+    if (selected.target && String(selected.target.properties.id) === String(nodeId)) {
+      return selected.target.properties.name || selected.target.properties.ota || selected.target.properties.id || String(nodeId);
     }
 
     // Final fallback: any node with this ID
