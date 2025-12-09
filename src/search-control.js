@@ -1007,11 +1007,11 @@ export default async function initSearchControl(map, opts = {}) {
   }
 
   // Helper function to get the preferred node name for display
-  // Priority: 1) Name from node with geometry (Original Node), 2) User-entered/Selected name
+  // Priority: 1) Name from node with geometry (Original Name), 2) Fallback to ID
   function getPreferredNodeName(nodeId) {
     if (! nodeId) return String(nodeId);
 
-    // 1. Always prioritize the "original" node (the one with geometry)
+    // Always prioritize finding a node with geometry to get the "original" name
     const nodeWithGeometry = allFeatures.find(f =>
     f.properties &&
     String(f.properties.id) === String(nodeId) &&
@@ -1022,16 +1022,8 @@ export default async function initSearchControl(map, opts = {}) {
     true)
     );
 
-    if (nodeWithGeometry && nodeWithGeometry.properties && nodeWithGeometry.properties.name) {
-      return nodeWithGeometry.properties.name;
-    }
-
-    // 2. Fall back to selected source/target properties if original name not found
-    if (selected.source && String(selected.source.properties.id) === String(nodeId)) {
-      return selected.source.properties.name || selected.source.properties.ota || selected.source.properties.id || String(nodeId);
-    }
-    if (selected.target && String(selected.target.properties.id) === String(nodeId)) {
-      return selected.target.properties.name || selected.target.properties.ota || selected.target.properties.id || String(nodeId);
+    if (nodeWithGeometry && nodeWithGeometry.properties) {
+      return nodeWithGeometry.properties.name || nodeWithGeometry.properties.id || String(nodeId);
     }
 
     // Final fallback: any node with this ID
@@ -1212,6 +1204,17 @@ export default async function initSearchControl(map, opts = {}) {
           nodeRank = getNodeRank(row.nodeId);
         }
 
+        // Look up OTA property from the main feature (with geometry)
+        let otaText = '';
+        const mainNode = allFeatures.find(f =>
+        f.properties && String(f.properties.id) === String(row.nodeId) &&
+        f.geometry && f.geometry.coordinates &&
+        (f.geometry.type === 'Point' ? (f.geometry.coordinates[0] !== 0 || f.geometry.coordinates[1] !== 0) : true)
+        );
+        if (mainNode && mainNode.properties && mainNode.properties.ota) {
+          otaText = mainNode.properties.ota;
+        }
+
         // Get rank label text (for expanded view)
         const rankText = (nodeRank !== null && ! isNaN(nodeRank) && rankLabelMap.hasOwnProperty(nodeRank))
         ? rankLabelMap[nodeRank]
@@ -1255,6 +1258,18 @@ export default async function initSearchControl(map, opts = {}) {
         <div class="ml-node-card-lines-loading">Loading lines...</div>
         </div>`;
 
+        // Build Header HTML (Name + OTA)
+        let headerHtml;
+        if (otaText) {
+          headerHtml = `
+          <div class="ml-node-card-header" style="display: flex; justify-content: space-between; align-items: baseline; width: 100%;">
+          <div class="ml-node-card-name">${label}</div>
+          <div class="ml-node-card-ota" style="text-align: right; font-weight: bold; margin-left: 8px;">${escapeHtml(otaText)}</div>
+          </div>`;
+        } else {
+          headerHtml = `<div class="ml-node-card-name">${label}</div>`;
+        }
+
         return `
         <div class="ml-flow-row ml-flow-row-node">
         <div class="ml-flow-left">
@@ -1264,7 +1279,7 @@ export default async function initSearchControl(map, opts = {}) {
         <div class="ml-node-card" tabindex="0" role="button" aria-expanded="false" data-node-id="${escapeHtml(String(row.nodeId || ''))}" data-lines-loaded="false">
         <span class="ml-node" style="${nodeStyle}"></span>
         <div class="ml-node-card-content">
-        <div class="ml-node-card-name">${label}</div>
+        ${headerHtml}
         ${rankHtml}
         ${alternatesHtml}
         ${linesHtml}
