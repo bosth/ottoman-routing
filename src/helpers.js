@@ -1,14 +1,20 @@
 // helpers.js
 import humanizeDuration from 'humanize-duration';
 
-export const isoCodeToName = {
-    'ara' : 'Arabic',
-    'ell' : 'Greek',
-    'eng' : 'English',
-    'fra' : 'French',
-    'ota' : 'Ottoman',
-    'tur' : 'Turkish',
-}
+export const isoLanguages = [
+{ code: 'ota', name: 'Ottoman' },
+{ code: 'ara', name: 'Arabic' },
+{ code: 'tur', name: 'Turkish' },
+{ code: 'ell', name: 'Greek' },
+{ code: 'eng', name: 'English' },
+{ code: 'fra', name: 'French' },
+];
+
+// Map for quick lookup, derived from the ordered list
+export const isoCodeToName = isoLanguages.reduce((acc, item) => {
+    acc[item.code] = item.name;
+    return acc;
+}, {});
 
 // Integer mode value to named mode mapping from API
 export const modeIntToName = {

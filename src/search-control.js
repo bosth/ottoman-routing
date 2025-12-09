@@ -16,6 +16,7 @@ import {
     shuffle,
     modeIntToName,
     isoCodeToName,
+    isoLanguages,
     wrapArabic,
 } from './helpers.js';
 
@@ -192,32 +193,23 @@ export default async function initSearchControl(map, opts = {}) {
     const listEl = alternatesSection.querySelector('.ml-node-card-alternates-list') || document.createElement('div');
     listEl.className = 'ml-node-card-alternates-list';
 
-    // 1. Get current title to avoid repetition
+    // Get current title to avoid repetition
     const titleEl = cardEl.querySelector('.ml-node-card-name');
-    const currentTitleRaw = titleEl ? titleEl.textContent : '';
-    const currentTitle = currentTitleRaw.trim().toLowerCase();
+    const currentTitleRaw = titleEl ? titleEl.textContent : ''; // Note: this might now include OTA text, careful extraction needed if strict dedupe required
+    // Ideally we check against the primary name used for the card title
 
-    // 2. Determine the "original" name from allFeatures (the one with geometry)
-    const nodeId = cardEl.dataset.nodeId;
-    let originalName = '';
-    if (nodeId) {
-      const mainFeature = allFeatures.find(f =>
-      f.properties &&
-      String(f.properties.id) === String(nodeId) &&
-      f.geometry
-      );
-      if (mainFeature && mainFeature.properties && mainFeature.properties.name) {
-        originalName = String(mainFeature.properties.name).trim();
-      }
-    }
+    // Sort namesFromApi based on isoLanguages order
+    namesFromApi.sort((a, b) => {
+      const idxA = isoLanguages.findIndex(l => l.code === a.iso639);
+      const idxB = isoLanguages.findIndex(l => l.code === b.iso639);
+      // If not found in list, put at end
+      const valA = idxA === -1 ? 999 : idxA;
+      const valB = idxB === -1 ? 999 : idxB;
+      return valA - valB;
+    });
 
-    // Clear existing alternates and replace with API data
+    const items = [];
     const seen = new Set();
-    if (currentTitle) seen.add(currentTitle);
-
-    const originalItems = [];
-    const otaItems = [];
-    const otherItems = [];
 
     // Helper to create HTML
     const createItem = (name, rawIso) => {
@@ -232,63 +224,21 @@ export default async function initSearchControl(map, opts = {}) {
       return `<div class="ml-node-card-alternate">${wrapArabic(displayText)}</div>`;
     };
 
-    // If the card title is NOT the original name, add the original name first
-    // (We treat the original name as having no ISO code effectively for sorting purposes here,
-    // or we could look it up, but usually the base name in the feature doesn't have lang info attached in this context)
-    if (originalName && originalName.toLowerCase() !== currentTitle) {
-      // Check if original name is already in the API list to get its iso code?
-      // The API list `namesFromApi` usually contains all variants.
-      // Let's rely on `namesFromApi` to provide the details for the original name if possible.
-
-      // However, if we want to FORCE it to appear even if not in the random api subset or just prioritize it:
-      // We will flag it.
-    }
-
     namesFromApi.forEach((nameObj) => {
       if (!nameObj) return;
-
       const name = nameObj.name ? String(nameObj.name).trim() : '';
       const rawIso = nameObj.iso639 ? String(nameObj.iso639).trim() : '';
 
       if (!name) return;
-
       const nameLower = name.toLowerCase();
-      if (seen.has(nameLower)) {
-        return;
-      }
+
+      if (seen.has(nameLower)) return;
       seen.add(nameLower);
 
-      const html = createItem(name, rawIso);
-
-      // Priority 1: It is the "original" name (and wasn't the title)
-      if (originalName && nameLower === originalName.toLowerCase()) {
-        originalItems.push(html);
-      }
-      // Priority 2: 'ota' code
-      else if (rawIso === 'ota') {
-        otaItems.push(html);
-      }
-      // Priority 3: Others
-      else {
-        otherItems.push(html);
-      }
+      items.push(createItem(name, rawIso));
     });
 
-    // If original name exists but wasn't found in namesFromApi (rare, but possible if API data is partial),
-    // and wasn't the title, we might want to inject it manually.
-    // For now, assuming namesFromApi covers it.
-    // If we missed the original name because it wasn't in namesFromApi, we check:
-    if (originalName && originalName.toLowerCase() !== currentTitle && originalItems.length === 0) {
-      // Only add if we haven't seen it (which we haven't, based on the check above)
-      // Since we don't have iso info from API, just show raw name
-      if (!seen.has(originalName.toLowerCase())) {
-        originalItems.push(`<div class="ml-node-card-alternate">${wrapArabic(originalName)}</div>`);
-        seen.add(originalName.toLowerCase());
-      }
-    }
-
-    // Join in order: Original -> OTA -> Others
-    listEl.innerHTML = originalItems.join('') + otaItems.join('') + otherItems.join('');
+    listEl.innerHTML = items.join('');
 
     if (!alternatesSection.parentNode) {
       cardEl.querySelector('.ml-node-card-content').appendChild(alternatesSection);
@@ -1006,13 +956,10 @@ export default async function initSearchControl(map, opts = {}) {
     return null;
   }
 
-  // Helper function to get the preferred node name for display
-  // Priority: 1) Name from node with geometry (Original Name), 2) Fallback to ID
-  function getPreferredNodeName(nodeId) {
-    if (! nodeId) return String(nodeId);
-
-    // Always prioritize finding a node with geometry to get the "original" name
-    const nodeWithGeometry = allFeatures.find(f =>
+  function getNodeOriginalFeature(nodeId) {
+    if (!nodeId) return null;
+    // Find node with geometry
+    let feat = allFeatures.find(f =>
     f.properties &&
     String(f.properties.id) === String(nodeId) &&
     f.geometry &&
@@ -1021,9 +968,31 @@ export default async function initSearchControl(map, opts = {}) {
     (f.geometry.coordinates[0] !== 0 || f.geometry.coordinates[1] !== 0) :
     true)
     );
+    // Fallback to any node with ID
+    if (!feat) {
+      feat = allFeatures.find(f => f.properties && String(f.properties.id) === String(nodeId));
+    }
+    return feat;
+  }
 
-    if (nodeWithGeometry && nodeWithGeometry.properties) {
-      return nodeWithGeometry.properties.name || nodeWithGeometry.properties.id || String(nodeId);
+  // Helper function to get the preferred node name for display
+  // Priority: 1) Name from node with geometry (Original Node), 2) User-entered/Selected name
+  function getPreferredNodeName(nodeId) {
+    if (! nodeId) return String(nodeId);
+
+    // 1. Always prioritize the "original" node (the one with geometry)
+    const nodeWithGeometry = getNodeOriginalFeature(nodeId);
+
+    if (nodeWithGeometry && nodeWithGeometry.properties && nodeWithGeometry.properties.name) {
+      return nodeWithGeometry.properties.name;
+    }
+
+    // 2. Fall back to selected source/target properties if original name not found
+    if (selected.source && String(selected.source.properties.id) === String(nodeId)) {
+      return selected.source.properties.name || selected.source.properties.ota || selected.source.properties.id || String(nodeId);
+    }
+    if (selected.target && String(selected.target.properties.id) === String(nodeId)) {
+      return selected.target.properties.name || selected.target.properties.ota || selected.target.properties.id || String(nodeId);
     }
 
     // Final fallback: any node with this ID
@@ -1194,7 +1163,11 @@ export default async function initSearchControl(map, opts = {}) {
 
     const flowRowsHtml = rows.map((row, rowIdx) => {
       if (row.type === 'node') {
-        const label = wrapArabic(String(row.label || ''));
+        const originalFeat = getNodeOriginalFeature(row.nodeId);
+        const originalProps = originalFeat ? originalFeat.properties : {};
+
+        const label = wrapArabic(String(originalProps.name || row.label || ''));
+        const otaText = originalProps.ota ? wrapArabic(String(originalProps.ota)) : '';
 
         // Determine rank for this node - look it up from allFeatures using nodeId
         let nodeRank = row.rank;
@@ -1202,17 +1175,6 @@ export default async function initSearchControl(map, opts = {}) {
         // If rank not already set, look it up
         if (nodeRank === null || nodeRank === undefined) {
           nodeRank = getNodeRank(row.nodeId);
-        }
-
-        // Look up OTA property from the main feature (with geometry)
-        let otaText = '';
-        const mainNode = allFeatures.find(f =>
-        f.properties && String(f.properties.id) === String(row.nodeId) &&
-        f.geometry && f.geometry.coordinates &&
-        (f.geometry.type === 'Point' ? (f.geometry.coordinates[0] !== 0 || f.geometry.coordinates[1] !== 0) : true)
-        );
-        if (mainNode && mainNode.properties && mainNode.properties.ota) {
-          otaText = mainNode.properties.ota;
         }
 
         // Get rank label text (for expanded view)
@@ -1241,6 +1203,9 @@ export default async function initSearchControl(map, opts = {}) {
         // Build alternates HTML (hidden by default, shown when expanded)
         let alternatesHtml = '';
         if (alternateNames.length > 0) {
+          // Note: updateAlternatesInCard will rewrite this content when data loads,
+          // but we provide a placeholder or static list here if data is already known
+          // For now, leaving the static generator as is, but it might be overridden by API data on expand.
           const alternateItems = alternateNames
           .map(name => `<div class="ml-node-card-alternate">${escapeHtml(name)}</div>`)
           .join('');
@@ -1258,18 +1223,6 @@ export default async function initSearchControl(map, opts = {}) {
         <div class="ml-node-card-lines-loading">Loading lines...</div>
         </div>`;
 
-        // Build Header HTML (Name + OTA)
-        let headerHtml;
-        if (otaText) {
-          headerHtml = `
-          <div class="ml-node-card-header" style="display: flex; justify-content: space-between; align-items: baseline; width: 100%;">
-          <div class="ml-node-card-name">${label}</div>
-          <div class="ml-node-card-ota" style="text-align: right; font-weight: bold; margin-left: 8px;">${escapeHtml(otaText)}</div>
-          </div>`;
-        } else {
-          headerHtml = `<div class="ml-node-card-name">${label}</div>`;
-        }
-
         return `
         <div class="ml-flow-row ml-flow-row-node">
         <div class="ml-flow-left">
@@ -1279,7 +1232,10 @@ export default async function initSearchControl(map, opts = {}) {
         <div class="ml-node-card" tabindex="0" role="button" aria-expanded="false" data-node-id="${escapeHtml(String(row.nodeId || ''))}" data-lines-loaded="false">
         <span class="ml-node" style="${nodeStyle}"></span>
         <div class="ml-node-card-content">
-        ${headerHtml}
+        <div class="ml-node-card-name" style="display: flex; justify-content: space-between;">
+        <span>${label}</span>
+        ${otaText ? `<span>${otaText}</span>` : ''}
+        </div>
         ${rankHtml}
         ${alternatesHtml}
         ${linesHtml}
