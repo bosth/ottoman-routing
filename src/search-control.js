@@ -484,13 +484,14 @@ export default async function initSearchControl(map, opts = {}) {
   // main.js is responsible for base node styling (nodes / nodes-symbol / nodes-label).
 
   const fuse = new Fuse(allFeatures, {
-    keys: ['properties.name', 'properties.id'],
+    keys: ['properties.name', 'properties.id', 'properties.ota'],
     threshold: 0.33,
     distance: 8,
     minMatchCharLength: 2,
     isCaseSensitive: false,
     ignoreDiacritics: true,
     includeScore: true,
+    includeMatches: true,
     shouldSort: true,
     location: 0
   });
@@ -582,6 +583,22 @@ export default async function initSearchControl(map, opts = {}) {
       return String(name || '').toLowerCase().trim();
     }
 
+    // Helper: determine best display name, respecting OTA match if present
+    function getDisplayName(resIndex, props) {
+      let name = String(props.name || '').trim();
+      if (resIndex >= 0 && st.lastResults[resIndex]) {
+        const r = st.lastResults[resIndex];
+        // If we have matches info and OTA matched, use OTA name
+        if (r.matches) {
+          const otaMatch = r.matches.find(m => m.key === 'properties.ota');
+          if (otaMatch && otaMatch.value) {
+            name = otaMatch.value;
+          }
+        }
+      }
+      return name;
+    }
+
     // Build a map of all results by their node ID for quick lookup
     const resultsByNodeId = new Map();
     results.forEach((r, resIndex) => {
@@ -664,7 +681,6 @@ export default async function initSearchControl(map, opts = {}) {
     });
 
     // For clusters where the header wasn't in results, try to find it from allFeatures
-    // For clusters where the header wasn't in results, try to find it from allFeatures
     for (const [clusterId, group] of clusterGroups.entries()) {
       if (!group.header) {
         // FIX: Prefer the main node (with geometry) as the header
@@ -719,7 +735,7 @@ export default async function initSearchControl(map, opts = {}) {
       if (st.selectableIndices.length >= maxSuggestions) return null;
 
       const props = item.properties || {};
-      const name = String(props.name || '').trim();
+      const name = String(props.name || props.ota || '').trim();
       const rankLabel = rankLabelForProps(props);
       const nameNorm = normalizeName(name);
 
@@ -778,7 +794,7 @@ export default async function initSearchControl(map, opts = {}) {
       if (st.selectableIndices.length >= maxSuggestions) return null;
 
       const props = item.properties || {};
-      const name = String(props.name || '').trim();
+      const name = String(props.name || props.ota || '').trim();
       const rankLabel = rankLabelForProps(props);
       const displayName = name || (props.id !== undefined ? String(props.id) : 'Unknown');
 
@@ -832,7 +848,11 @@ export default async function initSearchControl(map, opts = {}) {
 
         // Get header name and ID for comparison
         const headerProps = group.header ?  (group.header.item.properties || {}) : {};
-        const headerName = String(headerProps.name || headerProps.id || 'Unknown').trim();
+        // Use getDisplayName for header too
+        let headerName = getDisplayName(group.header ? group.header.resIndex : -1, headerProps);
+        if (!headerName) {
+          headerName = String(headerProps.id || 'Unknown').trim();
+        }
         const headerNodeId = headerProps.id;
 
         // Render header (non-selectable, bold)
@@ -920,7 +940,7 @@ export default async function initSearchControl(map, opts = {}) {
     else selected[role] = feat;
 
     const inp = state[role].input;
-    if (selected[role]) inp.value = selected[role].properties.name || selected[role].properties.id || '';
+    if (selected[role]) inp.value = selected[role].properties.name || selected[role].properties.ota || selected[role].properties.id || '';
     else inp.value = '';
 
     const feats = [];
@@ -972,7 +992,7 @@ export default async function initSearchControl(map, opts = {}) {
   function getNodeName(nodeId) {
     const node = getNodeById(nodeId);
     if (node && node.properties) {
-      return node.properties.name || node.properties.id || String(nodeId);
+      return node.properties.name || node.properties.ota || node.properties.id || String(nodeId);
     }
     return String(nodeId);
   }
@@ -993,10 +1013,10 @@ export default async function initSearchControl(map, opts = {}) {
 
     // Check if this node matches the selected source or target
     if (selected.source && String(selected.source.properties.id) === String(nodeId)) {
-      return selected.source.properties.name || selected.source.properties.id || String(nodeId);
+      return selected.source.properties.name || selected.source.properties.ota || selected.source.properties.id || String(nodeId);
     }
     if (selected.target && String(selected.target.properties.id) === String(nodeId)) {
-      return selected.target.properties.name || selected.target.properties.id || String(nodeId);
+      return selected.target.properties.name || selected.target.properties.ota || selected.target.properties.id || String(nodeId);
     }
 
     // Fall back to finding a node with geometry
@@ -1011,7 +1031,7 @@ export default async function initSearchControl(map, opts = {}) {
     );
 
     if (nodeWithGeometry && nodeWithGeometry.properties) {
-      return nodeWithGeometry.properties.name || nodeWithGeometry.properties.id || String(nodeId);
+      return nodeWithGeometry.properties.name || nodeWithGeometry.properties.ota || nodeWithGeometry.properties.id || String(nodeId);
     }
 
     // Final fallback: any node with this ID
