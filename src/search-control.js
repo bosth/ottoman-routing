@@ -134,16 +134,72 @@ export default async function initSearchControl(map, opts = {}) {
   const state = {
     source: { input: sourceBox, suggestionsEl: sourceSug, lastResults: [], activeIndex: -1, debounce: null, selectableIndices: [] },
     target: { input: targetBox, suggestionsEl: targetSug, lastResults: [], activeIndex: -1, debounce: null, selectableIndices: [] },
-    settings: { year: 1914, allowedModes: {} }
+    settings:  { year: 1914, allowedModes: {}, showOta: false }
   };
 
   // Cache for node lines data to avoid repeated fetches
   const nodeLinesCache = new Map();
 
+
+  // Update map labels based on OTA setting
+  // New behavior: when showOta is true, only render labels for features that have a usable ota value.
+  // Fallback 'name' labels are hidden entirely while showOta is true.
+  function updateLabelLayers() {
+    const showOta = state.settings.showOta;
+    const otaFontStack = ['Amiri Regular'];
+    const defaultFontStack = ['Noto Sans Regular'];
+
+    // Strict test for a usable OTA value: property exists and is not empty/null
+    const hasOtaExpr = ['all',
+    ['has', 'ota'],
+    ['!=', ['get', 'ota'], ''],
+    ['!=', ['get', 'ota'], null]
+    ];
+
+    // Sizes (interpolated by zoom)
+    const defaultSize = ['interpolate', ['linear'], ['zoom'], 6, 10, 12, 14];
+    const otaSize = ['interpolate', ['linear'], ['zoom'], 6, 15, 12, 21];
+
+    // Update global node labels (if layer exists - created by main.js)
+    if (map.getLayer('nodes-label')) {
+      if (showOta) {
+        // Only show ota text and only for features that have an ota value
+        map.setLayoutProperty('nodes-label', 'text-field', ['get', 'ota']);
+        map.setLayoutProperty('nodes-label', 'text-font', otaFontStack);
+        map.setLayoutProperty('nodes-label', 'text-size', otaSize);
+        map.setFilter('nodes-label', hasOtaExpr);
+      } else {
+        // Restore to showing name for all features
+        map.setLayoutProperty('nodes-label', 'text-field', ['get', 'name']);
+        map.setLayoutProperty('nodes-label', 'text-font', defaultFontStack);
+        map.setLayoutProperty('nodes-label', 'text-size', defaultSize);
+        map.setFilter('nodes-label', null);
+      }
+    }
+
+    // Update selected node labels
+    if (map.getLayer('search-selected-label')) {
+      if (showOta) {
+        // Show only ota for selected features that actually have ota.
+        // Note: setSelectedFeature ensures the 'ota' property is preserved on features in the 'search-selected' source.
+        map.setLayoutProperty('search-selected-label', 'text-field', ['get', 'ota']);
+        map.setLayoutProperty('search-selected-label', 'text-font', otaFontStack);
+        map.setLayoutProperty('search-selected-label', 'text-size', 18);
+        map.setFilter('search-selected-label', hasOtaExpr);
+      } else {
+        // Restore fallback layout for selected labels
+        map.setLayoutProperty('search-selected-label', 'text-field', ['coalesce', ['get', 'shortLabel'], ['get', 'name'], ['get', 'id']]);
+        map.setLayoutProperty('search-selected-label', 'text-font', defaultFontStack);
+        map.setLayoutProperty('search-selected-label', 'text-size', 12);
+        map.setFilter('search-selected-label', null);
+      }
+    }
+  }
+
   async function fetchNodeLines(nodeId) {
     if (!nodeId) return { names: [], lines: [] };
 
-    if (nodeLinesCache. has(String(nodeId))) {
+    if (nodeLinesCache.has(String(nodeId))) {
       return nodeLinesCache.get(String(nodeId));
     }
 
@@ -156,7 +212,7 @@ export default async function initSearchControl(map, opts = {}) {
 
       // Try both formats: { result: { names, lines } } OR { names, lines } directly
       const result = (data && data.result) ? data.result : data;
-      const names = Array. isArray(result?. names) ? result.names : [];
+      const names = Array.isArray(result?.names) ? result.names : [];
       const lines = Array.isArray(result?.lines) ? result.lines : [];
 
       const payload = { names, lines };
@@ -338,6 +394,34 @@ export default async function initSearchControl(map, opts = {}) {
     // Append to panel
     settingsPanel.appendChild(grid);
     settingsPanel.appendChild(sliderRow);
+
+    const otaRow = document.createElement('div');
+    otaRow.className = 'ml-settings-slider-row';
+
+    const otaLabel = document.createElement('label');
+    otaLabel.className = 'ml-settings-item';
+    otaLabel.style.paddingTop = '8px';
+
+    const otaCheckbox = document.createElement('input');
+    otaCheckbox.type = 'checkbox';
+    otaCheckbox.id = 'mlOtaToggle';
+    otaCheckbox.checked = !!state.settings.showOta;
+    otaCheckbox.className = 'ml-mode-checkbox';
+
+    otaCheckbox.addEventListener('change', () => {
+      state.settings.showOta = otaCheckbox.checked;
+      updateLabelLayers();
+    });
+
+    const otaText = document.createElement('span');
+    otaText.className = 'ml-settings-item-label';
+    otaText.textContent = 'Show Ottoman script labels';
+
+    otaLabel.appendChild(otaCheckbox);
+    otaLabel.appendChild(otaText);
+    otaRow.appendChild(otaLabel);
+
+    settingsPanel.appendChild(otaRow);
   }
 
   // Settings button click handler
@@ -483,7 +567,12 @@ export default async function initSearchControl(map, opts = {}) {
         'text-size': 12,
         'text-offset': [0, 1.2]
       },
-      paint: { 'text-color': '#222' }
+      paint: {
+        'text-color': '#222',
+        'text-halo-color': '#fff',
+        'text-halo-width': 2,
+        'text-halo-blur': 0
+      }
     });
   }
 
@@ -900,7 +989,9 @@ export default async function initSearchControl(map, opts = {}) {
       properties: {
         role: 'source',
         id: selected.source.properties.id,
+        // keep both name and ota on the feature so the 'search-selected' label layer can filter / display correctly
         name: selected.source.properties.name || selected.source.properties.ota,
+        ota: selected.source.properties.ota ?? null,
         shortLabel: selected.source.properties.shortLabel
       }
     });
@@ -911,6 +1002,7 @@ export default async function initSearchControl(map, opts = {}) {
         role: 'target',
         id: selected.target.properties.id,
         name: selected.target.properties.name || selected.target.properties.ota,
+        ota: selected.target.properties.ota ?? null,
         shortLabel: selected.target.properties.shortLabel
       }
     });
@@ -980,14 +1072,14 @@ export default async function initSearchControl(map, opts = {}) {
   function getPreferredNodeName(nodeId) {
     if (! nodeId) return String(nodeId);
 
-    // 1. Always prioritize the "original" node (the one with geometry)
+    // 1.Always prioritize the "original" node (the one with geometry)
     const nodeWithGeometry = getNodeOriginalFeature(nodeId);
 
     if (nodeWithGeometry && nodeWithGeometry.properties && nodeWithGeometry.properties.name) {
       return nodeWithGeometry.properties.name;
     }
 
-    // 2. Fall back to selected source/target properties if original name not found
+    // 2.Fall back to selected source/target properties if original name not found
     if (selected.source && String(selected.source.properties.id) === String(nodeId)) {
       return selected.source.properties.name || selected.source.properties.ota || selected.source.properties.id || String(nodeId);
     }
@@ -1245,7 +1337,7 @@ export default async function initSearchControl(map, opts = {}) {
         </div>`;
       }
 
-      // ... existing code ...
+      // ...existing code ...
       const segColor = String(row.color || '#000000');
       const modeName = row.mode; // Already canonical string
       const symbolName = modeSymbolMap[modeName] || 'directions_walk';
@@ -1260,7 +1352,7 @@ export default async function initSearchControl(map, opts = {}) {
       else if (modeName === 'connection' || modeName === 'transfer') connectorModeClass = modeName;
       else if (modeName === 'road' || modeName === 'chaussee' || modeName === 'chausee') {
         // Cased line for road/chaussee
-        // road = thinner (e.g. 4px), chaussee = thicker (e.g. 6px)
+        // road = thinner (e.g.4px), chaussee = thicker (e.g.6px)
         const width = (modeName === 'road') ? '4px' : '6px';
         // Use background-color + black border to create the casing effect
         connectorStyleOverride = `background-color:${escapeHtml(segColor)}; border:1px solid #000; width:${width}; box-sizing:border-box;`;
@@ -1891,7 +1983,7 @@ export default async function initSearchControl(map, opts = {}) {
         ev.preventDefault();
         if (st.activeIndex >= 0 && st.activeIndex < st.suggestionsEl.children.length) {
           // The activeIndex refers to the selectable .suggestion items within the list,
-          // not group headers. We'll query selectable items and map to the underlying index.
+          // not group headers.We'll query selectable items and map to the underlying index.
           const items = Array.from(st.suggestionsEl.querySelectorAll('.suggestion'));
           if (items[st.activeIndex]) {
             const selIdx = Number(items[st.activeIndex].dataset.index);

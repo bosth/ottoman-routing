@@ -7,6 +7,14 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import './search-control.css';
 import initSearchControl from './search-control.js';
 
+maplibregl.setRTLTextPlugin(
+  'https://unpkg.com/@mapbox/mapbox-gl-rtl-text@0.2.3/mapbox-gl-rtl-text.min.js',
+  (err) => {
+    if (err) console.error('RTL plugin failed to load:', err);
+  },
+  true // lazy load
+);
+
 const root = document.getElementById('app') || (() => {
   const el = document.createElement('div');
   el.id = 'app';

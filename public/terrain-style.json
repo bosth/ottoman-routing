@@ -25,7 +25,7 @@
     }
   },
   "sprite": "https://raw.githubusercontent.com/maputnik/osm-liberty/refs/heads/gh-pages/sprites/osm-liberty",
-  "glyphs": "https://static.urban-its.ru/fonts/{fontstack}/{range}.pbf",
+  "glyphs": "{fontstack}/{range}.pbf",
     "layers": [
     {
       "id": "background",
