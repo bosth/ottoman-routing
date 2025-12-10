@@ -9,6 +9,9 @@
   font-size: 150%;
   /* "middle" aligns the midpoint of this text with the middle of the Latin text */
   vertical-align: top;
+  /* Ensure right-to-left flow for correct character connection */
+  direction: rtl;
+  unicode-bidi: embed;
 
   line-height: 0.8;
 
@@ -30,6 +33,8 @@
   box-sizing: border-box;
   pointer-events: auto;
 }
+
+/* ... existing code ... */
 
 .maplibregl-ctrl-top-left {
   position: absolute;

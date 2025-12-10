@@ -6,6 +6,8 @@ export const isoLanguages = [
 { code: 'ara', name: 'Arabic' },
 { code: 'tur', name: 'Turkish' },
 { code: 'ell', name: 'Greek' },
+{ code: 'hye', name: 'Armenian' },
+{ code: 'lad', name: 'Ladino' },
 { code: 'eng', name: 'English' },
 { code: 'fra', name: 'French' },
 ];
@@ -66,6 +68,7 @@ export const modeSymbolMap = {
 
 // rankLabelMap contains mapping between rank and its textual representation
 export const rankLabelMap = {
+   10: 'pay-ı taht',
     9: 'vilâyet merkezi',
     8: 'sancak merkezi',
     7: 'kazâ merkezi',
